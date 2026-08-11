@@ -47,6 +47,53 @@ Device IDs are machine-specific. List PortAudio devices before selecting them:
 node -e "console.log(require('naudiodon2').getDevices())"
 ```
 
+The daemon needs 16 kHz mono int16 input and 24 kHz mono float32 output. Pick
+MME or DirectSound endpoints; shared-mode WASAPI endpoints usually reject those
+rates and the daemon then fails at startup with the device name, host API,
+requested rate and the device default rate on stderr.
+
+## Microphone sensitivity
+
+Voice detection adapts to the measured noise floor, so quiet microphones trigger
+on normal speech without turning room noise into speech. Speech cannot start
+during the first 300 ms after the stream opens, which absorbs the driver's
+startup burst. Tune it when needed:
+
+```powershell
+npm run daemon -- --vad-sensitivity high
+npm run daemon -- --vad-fixed --vad-start-rms 0.008 --vad-stop-rms 0.006
+```
+
+`--vad-sensitivity` accepts `low`, `medium` (default) or `high`. `--vad-fixed`
+disables adaptation and uses the absolute thresholds. To see live levels and
+detection events for a device:
+
+```powershell
+node scripts/vad-check.mjs --input-device 13 --seconds 15
+```
+
+The input is re-sliced into exact 20 ms frames before detection, because
+PortAudio hands over whatever the driver produces — often several hundred
+milliseconds per event, which would otherwise stretch the attack and release
+windows by more than an order of magnitude.
+
+## Turn lifecycle
+
+A turn completes only when the daemon closes the utterance: the provider emits a
+final transcript after `input_audio.end`, which the daemon sends as soon as the
+detector hears the speaker stop. The provider then ends that session, so a fresh
+one is opened for the next utterance. To inspect the raw provider messages:
+
+```powershell
+node --env-file=.env scripts/stt-probe.mjs --input-device 13 --seconds 8
+```
+
+Interrupting a reply keeps whatever was already generated in the conversation
+history, so the next answer continues instead of repeating the first one.
+
+Current known issues and open tuning questions are tracked in
+[PROGRESS.md](PROGRESS.md).
+
 Headset mode is the supported default. Speaker mode is rejected unless
 `--echo-cancel` is supplied; its rolling-reference suppressor is not a full
 acoustic echo canceller and needs device-specific validation.

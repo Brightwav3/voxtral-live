@@ -23,7 +23,21 @@ export function createRealtimeTranscriber({
   let inputEnded = false;
   const pendingTurns = [];
 
-  return { connect, beginTurn, pushAudio, on, close };
+  return { connect, beginTurn, pushAudio, endInput, on, close };
+
+  // The provider only emits a final transcript after the input is closed, so
+  // the caller ends the utterance when its detector hears the speaker stop.
+  function endInput() {
+    if (!isOpen(socket, WebSocketImpl) || inputEnded) return false;
+    try {
+      send(socket, { type: 'input_audio.end' });
+    } catch (error) {
+      emit('error', providerError(sendFailureCode(error, 'send_failed')));
+      return false;
+    }
+    inputEnded = true;
+    return true;
+  }
 
   function beginTurn({ turnId, generationId } = {}, { replaces } = {}) {
     if (typeof turnId !== 'string' || !turnId.trim()) throw new TypeError('turnId is required');
@@ -156,9 +170,28 @@ export function createRealtimeTranscriber({
       if (turn && typeof payload.text === 'string' && payload.text) {
         emit('final', { event: 'final', text: payload.text, ...turn });
       }
+      renewSession();
     } else if (payload.type === 'error') {
       emit('error', providerError(payload.error?.code));
     }
+  }
+
+  // A closed input ends the provider session for good, so the next utterance
+  // needs a fresh socket. Reconnect right after the final transcript lands.
+  function renewSession() {
+    if (permanentlyClosed || !inputEnded) return;
+    const staleSocket = socket;
+    socket = undefined;
+    inputEnded = false;
+    connectPromise = undefined;
+    if (staleSocket && !isClosed(staleSocket, WebSocketImpl)) {
+      try {
+        staleSocket.close(1000);
+      } catch {
+        // The provider may already be tearing the socket down.
+      }
+    }
+    connect().catch(() => emit('error', providerError('reconnect_failed')));
   }
 
   function emit(eventName, event) {

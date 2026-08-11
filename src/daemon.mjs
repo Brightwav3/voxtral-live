@@ -58,7 +58,11 @@ export function startDaemon({
   const audioBackend = echoSuppressor
     ? withEchoReference(physicalAudioBackend, echoSuppressor)
     : physicalAudioBackend;
-  const vad = dependencies.vad ?? createVad({ sampleRate: config.sampleRate, frameMs: config.frameMs });
+  const vad = dependencies.vad ?? createVad({
+    sampleRate: config.sampleRate,
+    frameMs: config.frameMs,
+    ...config.vad,
+  });
   const transcriber = dependencies.transcriber ?? createRealtimeTranscriber({
     apiKey: config.apiKey,
     model: config.sttModel,
@@ -214,7 +218,9 @@ if (isMainModule) {
   try {
     const runtime = startDaemon();
     await runtime.ready;
-  } catch {
+  } catch (error) {
+    // The event stream stays terse; the operator needs the device details.
+    process.stderr.write(`${error?.message ?? error}\n`);
     process.exitCode = 1;
   }
 }

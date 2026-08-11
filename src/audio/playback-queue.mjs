@@ -6,6 +6,7 @@ export function createPlaybackQueue({ writeFrame }) {
   let generation = 0;
   let idlePromise = Promise.resolve();
   let finishDrain = () => {};
+  let failDrain = () => {};
 
   return { write, stopOutput, flush };
 
@@ -32,20 +33,29 @@ export function createPlaybackQueue({ writeFrame }) {
           await writeFrame(entry.frame, () => entry.generation === generation);
         }
       }
-    })().finally(() => {
-      draining = false;
-      if (queuedFrames.length > 0) {
-        finishDrain();
-        scheduleDrain();
-      } else {
-        finishDrain();
-      }
-    });
+    })().then(
+      () => settleDrain(),
+      (error) => {
+        // Surface stream failures through flush() instead of leaving an
+        // unhandled rejection; the queue is dropped so playback can restart.
+        queuedFrames = [];
+        settleDrain(error);
+      },
+    );
+  }
+
+  function settleDrain(error) {
+    draining = false;
+    const pending = queuedFrames.length > 0;
+    if (error) failDrain(error);
+    else finishDrain();
+    if (pending) scheduleDrain();
   }
 
   function scheduleDrain() {
     draining = true;
-    idlePromise = new Promise((resolve) => { finishDrain = resolve; });
+    idlePromise = new Promise((resolve, reject) => { finishDrain = resolve; failDrain = reject; });
+    idlePromise.catch(() => {});
     queueMicrotask(drain);
   }
 }

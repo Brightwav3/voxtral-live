@@ -30,7 +30,51 @@ export function loadConfig(env = process.env, argv = []) {
     echoCancellation,
     sampleRate: 16000,
     frameMs: 20,
+    vad: readVadOptions(argv),
   };
+}
+
+function readVadOptions(argv) {
+  const sensitivity = readEnum(argv, '--vad-sensitivity', ['low', 'medium', 'high']);
+  const startRms = readPositiveFloat(argv, '--vad-start-rms');
+  const stopRms = readPositiveFloat(argv, '--vad-stop-rms');
+  const adaptive = argv.includes('--vad-fixed') ? false : undefined;
+  if (startRms !== undefined && stopRms !== undefined && stopRms > startRms) {
+    throw invalidCliArgument('invalid_value', '--vad-stop-rms must be less than or equal to --vad-start-rms', '--vad-stop-rms');
+  }
+  return removeUndefined({ sensitivity, startRms, stopRms, adaptive });
+}
+
+function removeUndefined(options) {
+  return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
+}
+
+function readEnum(argv, flag, allowed) {
+  const value = readFlagValue(argv, flag, `${flag} requires one of ${allowed.join(', ')}`);
+  if (value === undefined) return undefined;
+  if (!allowed.includes(value)) {
+    throw invalidCliArgument('invalid_value', `${flag} must be one of ${allowed.join(', ')}`, flag);
+  }
+  return value;
+}
+
+function readPositiveFloat(argv, flag) {
+  const value = readFlagValue(argv, flag, `${flag} requires a positive number`);
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw invalidCliArgument('invalid_value', `${flag} must be a positive number`, flag);
+  }
+  return parsed;
+}
+
+function readFlagValue(argv, flag, missingMessage) {
+  const index = argv.findIndex((argument) => argument === flag || argument.startsWith(`${flag}=`));
+  if (index === -1) return undefined;
+  const argument = argv[index];
+  const value = argument === flag ? argv[index + 1] : argument.slice(flag.length + 1);
+  if (!value || value.startsWith('--')) throw invalidCliArgument('missing_value', missingMessage, flag);
+  return value;
 }
 
 function readAudioProfile(argv) {

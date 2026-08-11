@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createAudioBackend } from '../src/audio/audio-backend.mjs';
+import { createFramer } from '../src/audio/portaudio-backend.mjs';
 import { createVad } from '../src/audio/vad.mjs';
 
 test('opens exact mono PCM streams and closes both streams', async () => {
@@ -12,7 +13,7 @@ test('opens exact mono PCM streams and closes both streams', async () => {
   await backend.startInput((frame) => received.push(frame));
   backend.writeOutput(new Float32Array([1, -1]));
   await waitFor(() => streams.length === 2 && streams[1].writes.length === 1);
-  streams[0].emit('data', Buffer.from([1, 2]));
+  streams[0].emit('data', Buffer.alloc(640, 1));
   await backend.close();
 
   assert.deepEqual(streams[0].options, {
@@ -35,7 +36,7 @@ test('opens exact mono PCM streams and closes both streams', async () => {
       closeOnError: true,
     },
   });
-  assert.deepEqual(received, [Buffer.from([1, 2])]);
+  assert.deepEqual(received, [Buffer.alloc(640, 1)]);
   assert.equal(streams[0].started, 1);
   assert.equal(streams[1].started, 1);
   assert.equal(streams[0].quitCalls, 1);
@@ -66,7 +67,8 @@ test('rejects concurrent input starts before the first load resolves', async () 
 test('interrupting speech stops the active output stream and discards stale audio', async () => {
   const { PortAudio, streams } = createFakePortAudio();
   const backend = createAudioBackend({ PortAudio });
-  const vad = createVad({ startRms: 0.05, stopRms: 0.03 });
+  const vad = createVad({ startRms: 0.05, stopRms: 0.03, adaptive: false });
+  for (let index = 0; index < 20; index += 1) vad.push(new Float32Array(320));
 
   backend.writeOutput(new Float32Array([1]));
   await waitFor(() => streams.length === 1 && streams[0].writes.length === 1);
@@ -118,6 +120,49 @@ test('flushOutput closes the output stream after the final frame drains', async 
   await backend.close();
 });
 
+
+test('explains which device and sample rate the input stream rejected', async () => {
+  const PortAudio = {
+    SampleFormat16Bit: 's16',
+    SampleFormatFloat32: 'f32',
+    AudioIO: class { constructor() { throw new Error('Invalid sample rate'); } },
+    getDevices: () => [{ id: 29, name: 'Headset Microphone', hostAPIName: 'Windows WASAPI', defaultSampleRate: 48000 }],
+  };
+  const backend = createAudioBackend({ inputDevice: 29, PortAudio });
+
+  await assert.rejects(() => backend.startInput(() => {}), (error) => {
+    assert.equal(error.code, 'audio_stream_open_failed');
+    assert.equal(error.deviceId, 29);
+    assert.equal(error.sampleRate, 16000);
+    assert.match(error.message, /device=29 \(Headset Microphone\)/);
+    assert.match(error.message, /hostApi=Windows WASAPI/);
+    assert.match(error.message, /sampleRate=16000/);
+    assert.match(error.message, /deviceDefaultSampleRate=48000/);
+    assert.match(error.message, /rejected 16000 Hz/);
+    return true;
+  });
+});
+
+test('surfaces output stream failures with device details', async () => {
+  const PortAudio = {
+    SampleFormat16Bit: 's16',
+    SampleFormatFloat32: 'f32',
+    AudioIO: class { constructor() { throw new Error('Invalid sample rate'); } },
+    getDevices: () => [{ id: 27, name: 'Speakers', hostAPIName: 'Windows WASAPI', defaultSampleRate: 48000 }],
+  };
+  const backend = createAudioBackend({ outputDevice: 27, PortAudio });
+  const failures = [];
+
+  backend.writeOutput(new Float32Array([0.1]));
+  await backend.flushOutput().catch((error) => failures.push(error));
+
+  const error = failures[0];
+  assert.equal(error?.code, 'audio_stream_open_failed');
+  assert.equal(error.direction, 'output');
+  assert.match(error.message, /device=27 \(Speakers\)/);
+  assert.match(error.message, /sampleRate=24000/);
+});
+
 function createFakePortAudio() {
   const streams = [];
   class AudioIO {
@@ -167,3 +212,33 @@ function deferred() {
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+test('re-slices driver chunks into exact 20 ms input frames', () => {
+  const frames = [];
+  const framer = createFramer((frame) => frames.push(frame));
+
+  framer(Buffer.alloc(1500, 1));
+  assert.deepEqual(frames.map((frame) => frame.length), [640, 640]);
+
+  framer(Buffer.alloc(500, 2));
+  assert.deepEqual(frames.map((frame) => frame.length), [640, 640, 640]);
+  assert.equal(frames[2][0], 1, 'the carried remainder leads the next frame');
+  assert.equal(frames[2].at(-1), 2, 'the next chunk completes it');
+
+  framer(Buffer.alloc(0));
+  framer('not a buffer');
+  assert.equal(frames.length, 3, 'empty and non-buffer chunks are ignored');
+});
+
+test('delivers 20 ms frames to the input handler regardless of driver chunk size', async () => {
+  const { PortAudio, streams } = createFakePortAudio();
+  const backend = createAudioBackend({ inputDevice: 13, PortAudio });
+  const received = [];
+
+  await backend.startInput((frame) => received.push(frame));
+  streams[0].emit('data', Buffer.alloc(7529 * 2, 3));
+  await backend.close();
+
+  assert.equal(received.length, 23);
+  assert.deepEqual([...new Set(received.map((frame) => frame.length))], [640]);
+});

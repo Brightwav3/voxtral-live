@@ -54,7 +54,34 @@ test('loads the default daemon configuration', () => {
     echoCancellation: false,
     sampleRate: 16000,
     frameMs: 20,
+    vad: {},
   });
+});
+
+test('reads VAD sensitivity overrides from CLI flags', () => {
+  assert.deepEqual(
+    loadConfig({ MISTRAL_API_KEY: 'test-key' }, ['--vad-sensitivity=high']).vad,
+    { sensitivity: 'high' },
+  );
+  assert.deepEqual(
+    loadConfig({ MISTRAL_API_KEY: 'test-key' }, ['--vad-start-rms', '0.006', '--vad-stop-rms', '0.004', '--vad-fixed']).vad,
+    { startRms: 0.006, stopRms: 0.004, adaptive: false },
+  );
+});
+
+test('rejects invalid VAD sensitivity flags', () => {
+  assert.throws(
+    () => loadConfig({ MISTRAL_API_KEY: 'test-key' }, ['--vad-sensitivity=ultra']),
+    (error) => error.code === 'ERR_INVALID_CLI_ARGUMENT' && error.argument === '--vad-sensitivity',
+  );
+  assert.throws(
+    () => loadConfig({ MISTRAL_API_KEY: 'test-key' }, ['--vad-start-rms', '0']),
+    (error) => error.reason === 'invalid_value',
+  );
+  assert.throws(
+    () => loadConfig({ MISTRAL_API_KEY: 'test-key' }, ['--vad-start-rms=0.01', '--vad-stop-rms=0.05']),
+    (error) => error.argument === '--vad-stop-rms',
+  );
 });
 
 test('loads optional PortAudio device IDs from CLI flags', () => {
@@ -74,6 +101,7 @@ test('loads optional PortAudio device IDs from CLI flags', () => {
       echoCancellation: false,
       sampleRate: 16000,
       frameMs: 20,
+      vad: {},
     },
   );
 });

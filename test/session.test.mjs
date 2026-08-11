@@ -4,6 +4,14 @@ import assert from 'node:assert/strict';
 import { createConversationSession } from '../src/conversation/session.mjs';
 import { createDelegationManager } from '../src/conversation/delegation.mjs';
 import { createVad } from '../src/audio/vad.mjs';
+
+// The detector ignores its startup calibration window, so tests warm it up on
+// silence before feeding synthetic speech.
+function calibratedVad(options) {
+  const vad = createVad(options);
+  for (let index = 0; index < 20; index += 1) vad.push(new Float32Array(320));
+  return vad;
+}
 import { createEchoSuppressor } from '../src/audio/echo-suppressor.mjs';
 
 test('assigns a unique turnId and generationId to every user turn', async () => {
@@ -197,7 +205,7 @@ test('sustained speaker echo does not latch VAD or hide a later human barge-in',
   const subject = createSubject({
     audioProfile: 'speaker',
     echoCancellation: true,
-    vad: createVad({ startRms: 0.05, stopRms: 0.03 }),
+    vad: calibratedVad({ startRms: 0.05, stopRms: 0.03, adaptive: false }),
     isPlaybackEcho: suppressor.isPlaybackEcho,
     async *streamChat() { yield { event: 'sentence_ready', text: 'Playing.' }; },
     async speak() { await holdSpeech.promise; },
@@ -271,6 +279,66 @@ test('accepts the current final when the interrupted turn never produced a provi
   await subject.session.shutdown();
 });
 
+
+test('ends the provider input when the speaker stops so a final transcript arrives', async () => {
+  const subject = createSubject();
+  await subject.session.start();
+
+  subject.input({ speechStarted: true });
+  assert.equal(subject.transcriber.endInputCalls, 0);
+  subject.input({ speechStopped: true });
+
+  assert.equal(subject.transcriber.endInputCalls, 1);
+  assert.equal(subject.transcriber.frames.length, 2, 'the closing frame is still transcribed');
+  await subject.session.shutdown();
+});
+
+test('reconnects the transcriber when the provider closes a recoverable session', async () => {
+  const subject = createSubject();
+  await subject.session.start();
+  assert.equal(subject.transcriber.connectCalls, 1);
+
+  subject.transcriber.emit('closed', { event: 'closed', code: 1011, recoverable: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(subject.transcriber.connectCalls, 2);
+
+  subject.transcriber.emit('closed', { event: 'closed', code: 1000, recoverable: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(subject.transcriber.connectCalls, 2, 'a deliberate close is not reconnected');
+  await subject.session.shutdown();
+});
+
+
+test('keeps an interrupted reply in the history so the next answer moves on', async () => {
+  const holdSpeech = deferred();
+  const conversations = [];
+  const subject = createSubject({
+    async *streamChat({ messages }) {
+      conversations.push(messages.map((message) => `${message.role}:${message.content}`));
+      yield { event: 'delta', text: 'I can help with many things.' };
+      yield { event: 'sentence_ready', text: 'I can help with many things.' };
+    },
+    async speak() { await holdSpeech.promise; },
+  });
+  await subject.session.start();
+
+  subject.input({ speechStarted: true });
+  subject.final('What can you do?');
+  await waitFor(() => subject.session.status().state === 'SPEAKING');
+
+  subject.input({ speechStarted: true });
+  subject.nextFinal('What model are you?');
+  await waitFor(() => conversations.length === 2);
+
+  assert.deepEqual(conversations[1], [
+    'user:What can you do?',
+    'assistant:I can help with many things.',
+    'user:What model are you?',
+  ]);
+  holdSpeech.resolve();
+  await subject.session.shutdown();
+});
+
 function createSubject(overrides = {}) {
   const events = [];
   const audio = {
@@ -297,8 +365,11 @@ function createSubject(overrides = {}) {
       transcriberContext = { turnId: turn.turnId, generationId: turn.generationId };
       pendingTranscriberTurns.push(transcriberContext);
     },
-    async connect() {},
+    connectCalls: 0,
+    endInputCalls: 0,
+    async connect() { transcriber.connectCalls += 1; },
     pushAudio(frame) { transcriber.frames.push(frame); return true; },
+    endInput() { transcriber.endInputCalls += 1; return true; },
     async close() {},
   });
   const turnController = createEmitter({
@@ -308,7 +379,11 @@ function createSubject(overrides = {}) {
   });
   const vad = overrides.vad ?? {
     push(frame) {
-      return { state: frame.speechStarted ? 'speech' : 'silence', speechStarted: frame.speechStarted, speechStopped: false };
+      return {
+        state: frame.speechStarted ? 'speech' : 'silence',
+        speechStarted: Boolean(frame.speechStarted),
+        speechStopped: Boolean(frame.speechStopped),
+      };
     },
     reset() {},
   };

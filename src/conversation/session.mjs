@@ -36,6 +36,7 @@ export function createConversationSession({
   const tasks = new Set();
   let state = SESSION_STATES.IDLE;
   let activeTurn;
+  let activeGeneration;
   let started = false;
   let closing = false;
 
@@ -49,6 +50,7 @@ export function createConversationSession({
       transcriber.on('partial', ({ text }) => turnController.pushPartial(text)),
       transcriber.on('final', handleFinalTranscript),
       transcriber.on('error', (error) => handleProviderError(error)),
+      transcriber.on('closed', handleTranscriberClosed),
       turnController.on('turn', ({ text }) => startAssistantTurn(text)),
     );
     await transcriber.connect();
@@ -83,6 +85,18 @@ export function createConversationSession({
       }
     }
     transcriber.pushAudio(frame);
+    // The provider finalizes a transcript only once the input is closed.
+    if (activity.speechStopped) transcriber.endInput?.();
+  }
+
+  function handleTranscriberClosed(event) {
+    if (closing || event?.recoverable === false) return;
+    Promise.resolve(transcriber.connect()).catch((error) => handleProviderError({
+      event: 'error',
+      code: 'transcriber_reconnect_failed',
+      message: error?.message ?? 'Realtime transcription reconnect failed',
+      recoverable: true,
+    }));
   }
 
   function handleFinalTranscript({ text, turnId, generationId }) {
@@ -109,9 +123,19 @@ export function createConversationSession({
     return { turnId: idFactory('t'), generationId: idFactory('g') };
   }
 
+  // An interrupted reply still happened as far as the user is concerned. Keep
+  // what was generated in the history, otherwise the model only ever sees a
+  // stack of user questions and keeps answering the first one.
+  function recordInterruptedReply() {
+    const partial = activeGeneration?.partialText().trim();
+    activeGeneration = undefined;
+    if (partial) history.push({ role: 'assistant', content: partial });
+  }
+
   function bargeIn() {
     const previous = activeTurn;
     const next = allocateTurn();
+    recordInterruptedReply();
     transition(SESSION_STATES.INTERRUPTED);
     audioBackend.stopOutput();
     cancellation.cancel('barge_in');
@@ -139,6 +163,7 @@ export function createConversationSession({
 
   async function runGeneration(scope) {
     let assistantText = '';
+    activeGeneration = { scope, partialText: () => assistantText };
     let audioStarted = false;
     let speechQueue = Promise.resolve();
     const delegatedResults = [];
@@ -197,6 +222,7 @@ export function createConversationSession({
       await speechQueue;
       if (audioStarted) await audioBackend.flushOutput();
       if (!cancellation.isCurrent(scope)) return;
+      activeGeneration = undefined;
       if (assistantText.trim()) history.push({ role: 'assistant', content: assistantText.trim() });
       publish({ event: 'assistant_final', text: assistantText.trim(), citations }, scope);
       transition(SESSION_STATES.LISTENING);
@@ -257,6 +283,7 @@ export function createConversationSession({
     transition(SESSION_STATES.INTERRUPTED);
     audioBackend.stopOutput();
     cancellation.cancel(reason);
+    recordInterruptedReply();
     publish({ event: 'assistant_cancelled', reason }, previous);
     transition(SESSION_STATES.LISTENING);
     publish({ event: 'listening' }, previous);

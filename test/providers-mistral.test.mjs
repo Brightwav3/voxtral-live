@@ -216,3 +216,37 @@ test('loads --stt-delay-ms and rejects invalid delay values', () => {
       && error.reason === 'invalid_value',
   );
 });
+
+test('endInput closes the utterance so the provider can finalize it', async () => {
+  const transcriber = createSubject();
+  const socket = await connect(transcriber);
+
+  assert.equal(transcriber.endInput(), true);
+  assert.deepEqual(JSON.parse(socket.sent.at(-1)), { type: 'input_audio.end' });
+  assert.equal(transcriber.endInput(), false, 'a closed input is not ended twice');
+  assert.equal(transcriber.pushAudio(Buffer.from([1, 2])), false, 'no audio is sent after the input ends');
+});
+
+test('opens a fresh session after a final transcript so the next turn is heard', async () => {
+  const transcriber = createSubject();
+  const finals = [];
+  transcriber.on('final', (event) => finals.push(event));
+  const first = await connect(transcriber);
+  transcriber.beginTurn({ turnId: 't_1', generationId: 'g_1' });
+  transcriber.endInput();
+
+  first.message({ type: 'transcription.done', text: 'Hello there' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(finals, [{ event: 'final', text: 'Hello there', turnId: 't_1', generationId: 'g_1' }]);
+  assert.equal(FakeWebSocket.instances.length, 2, 'a replacement socket is opened');
+
+  const second = FakeWebSocket.instances.at(-1);
+  second.open();
+  await new Promise((resolve) => setImmediate(resolve));
+  transcriber.beginTurn({ turnId: 't_2', generationId: 'g_2' });
+
+  assert.equal(transcriber.pushAudio(Buffer.from([1, 2])), true, 'audio flows again on the new session');
+  second.message({ type: 'transcription.done', text: 'Second turn' });
+  assert.equal(finals.at(-1).text, 'Second turn');
+});
