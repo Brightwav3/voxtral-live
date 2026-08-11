@@ -1,110 +1,106 @@
-# Mistral Voxtral
+# Voxtral Live
 
-The primary runtime is a headless Voxtral daemon. The existing browser UI is
-kept as a development harness for the batch TTS and transcription adapters.
+**Voxtral Live** is an experimental, local-first Windows voice assistant runtime built around Mistral audio services. It is inspired by the always-available interaction style of modern live voice assistants; it is an independent project and is not affiliated with, endorsed by, or made by OpenAI or Mistral AI.
+
+The product runtime is a headless Node.js daemon. It is designed to listen and respond through your system devices without keeping a browser window open. A small browser app remains in the source tree only as a development harness and is intentionally not published with this repository.
+
+## What works today
+
+- Headless daemon startup with a stable JSON Lines event stream.
+- `always-on` and `push-to-talk` runtime modes.
+- A Windows system-audio backend through PortAudio/`naudiodon2`, with selectable input and output device IDs.
+- A tested realtime Voxtral transcription WebSocket adapter for 16 kHz PCM audio, including partial and final transcript events.
+- Voice activity detection and a cancellable playback queue as separate building blocks for barge-in behavior.
+- Command-line batch transcription and text-to-speech, including saved voice IDs, consent-based reference-audio voice cloning, and MP3/WAV/FLAC/Opus/PCM output.
+- A test suite that uses local fakes and does not spend API credits.
+
+## Windows behavior
+
+`npm run daemon` runs in the terminal with no web UI and no HTTP listener. It prints one redacted JSON object per line to stdout, beginning with `daemon_started` and `listening`. Stop it with `Ctrl+C` to receive `daemon_stopped`.
+
+Use a headset while developing barge-in flows. Speaker-mode echo cancellation is not implemented yet, so it is not a reliable hands-free experience.
 
 ## Setup
 
-Create a private `.env` file with these exact keys:
+1. Install Node.js 20.6 or newer on Windows.
+2. Clone this repository and install dependencies.
 
-```dotenv
-MISTRAL_API_KEY=your-key
-VOXTRAL_MODE=always-on
-MISTRAL_STT_MODEL=voxtral-mini-transcribe-realtime-2602
-MISTRAL_LLM_MODEL=mistral-small-latest
-MISTRAL_TTS_MODEL=voxtral-mini-tts-latest
-MISTRAL_VOICE_ID=optional-voice-id
+   ```powershell
+   npm install
+   ```
+
+3. Copy the example environment file.
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+4. Set your Mistral API key in `.env`.
+
+   ```dotenv
+   MISTRAL_API_KEY=your_mistral_api_key
+   # Optional: use a compatible Mistral API proxy or regional endpoint.
+   # MISTRAL_BASE_URL=https://api.mistral.ai
+   ```
+
+`MISTRAL_API_KEY` is required. Keep `.env` private: it is ignored by Git and must never be committed.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm run daemon` | Start the headless daemon in `always-on` mode. |
+| `npm run daemon -- --mode push-to-talk` | Start the daemon in push-to-talk mode. |
+| `npm run daemon -- --once` | Emit startup events once, then exit; useful for smoke tests. |
+| `npm run control -- status` | Reserved for future local IPC; currently returns a structured not-implemented event. |
+| `npm run tts -- "Hello" --voice-id VOICE_ID --output output.wav` | Generate speech from text. |
+| `npm run tts -- "Hello" --ref-audio sample.wav --output output.mp3` | Generate speech from a consented reference clip. |
+| `npm run transcribe -- recording.wav --language en` | Batch-transcribe a local audio file. |
+| `npm test` | Run the local test suite. |
+| `npm run dev` | Run the private browser development harness; it is not part of the headless product. |
+
+## Security and redaction
+
+- The API key stays in the local daemon process; it is never sent to a browser.
+- JSONL events redact fields whose names look like credentials (`apiKey`, `authorization`, `token`, `secret`, and similar) and redact occurrences of the active Mistral key from string values.
+- The daemon event contract intentionally excludes raw microphone audio and full provider payloads.
+- Treat transcripts and reference audio as sensitive data. This project does not yet provide encrypted storage, OS credential-vault integration, or a retention policy.
+- Use voice cloning only with the speaker's clear consent and in accordance with your provider's policies.
+
+## Architecture
+
+```text
+System microphone / speakers
+          |
+  PortAudio audio backend
+          |
+ VAD + playback queue          Realtime STT adapter
+          |                            |
+          +------ future session / turn engine ------+
+                                                       |
+                                         Mistral LLM + TTS adapters
 ```
 
-`MISTRAL_API_KEY` is required and empty values are rejected. `VOXTRAL_MODE`
-may be `always-on` (the default) or `push-to-talk`; `--mode` on the command
-line overrides the environment value. Keep `.env` private; it is excluded by
-`.gitignore`.
+The code keeps the pieces separate so native audio, realtime transcription, playback interruption, and provider APIs can evolve independently. The rationale for the headless design is recorded in [ADR-001](docs/decisions/ADR-001-headless-background-daemon.md).
 
-## Headless daemon
+## Testing
 
-Start the daemon with:
-
-```powershell
-npm run daemon
-npm run daemon -- --mode push-to-talk
-```
-
-The daemon emits one JSON object per line (JSONL) to stdout. Initial events
-are `daemon_started` with `sessionId` and `mode`, followed by `listening` with
-`sessionId`. Future control and audio layers extend this event stream with
-turn and error events. Events never include the API key, raw microphone audio,
-or full provider payloads.
-
-The `control` command is reserved for the local IPC control layer. In Task 1
-it exits with a structured `control_not_implemented` error; it does not start
-another daemon. IPC commands are added in Task 8:
-
-```powershell
-npm run control -- status
-```
-
-```powershell
-npm run tts -- "Ahoj, tohle mluví Voxtral." --voice-id VOICE_ID
-```
-
-## Generate speech
-
-Use a preset or saved custom voice ID:
-
-```powershell
-npm run tts -- "Ahoj, tohle mluví Voxtral." --voice-id VOICE_ID --output output.mp3
-```
-
-Or provide a short reference clip for one-off voice cloning:
-
-```powershell
-npm run tts -- "Ahoj, tohle mluví Voxtral." --ref-audio sample.mp3 --output output.mp3
-```
-
-Supported output formats are `mp3`, `wav`, `flac`, `opus`, and `pcm`.
-
-## Transcribe audio
-
-Transcribe a local audio file with Voxtral Mini Transcribe 2:
-
-```powershell
-npm run transcribe -- sample.mp3 --language en
-```
-
-The current prototype uses the batch transcription endpoint and prints the
-result to the terminal. Realtime microphone transcription is the next layer.
-
-## Test
+Run the full suite with:
 
 ```powershell
 npm test
 ```
 
-The tests use a local fake HTTP response and do not spend API credits.
+Coverage includes the daemon contract, config validation, event redaction, realtime transcription protocol handling, VAD, playback queue, PortAudio adapter behavior, and the local development server. Tests mock network and native boundaries where practical; they do not validate live API credentials, installed audio hardware, or end-to-end conversations.
 
-Voice cloning must only be used with appropriate consent and in accordance
-with Mistral's usage policy.
+## Roadmap and current limitations
 
-## Launch the product
+The repository has the foundational pieces, not a finished conversational assistant.
 
-Start the local web app:
+1. Wire the audio backend, VAD, realtime transcription, LLM, and TTS adapters into one long-lived turn/session engine.
+2. Add local named-pipe IPC for status, speak, interrupt, and shutdown controls.
+3. Implement robust barge-in cancellation, reconnection, and error recovery.
+4. Add Windows startup/packaging, device discovery, and diagnostics.
+5. Establish an echo-cancelled speaker-mode profile and validate on real hardware.
 
-```powershell
-npm run dev
-```
-
-Open [http://localhost:4317](http://localhost:4317). The app automatically
-loads the voices available to the API key. No key is sent to the browser.
-
-The current product MVP supports:
-
-- preset and saved voice selection
-- one-off voice cloning from a short audio reference
-- MP3, WAV, FLAC, and OPUS speech output
-- local audio upload and batch transcription
-- browser playback, download, and transcript copy
-
-Realtime microphone transcription and full conversational barge-in are the
-next product layer; the API adapters are kept separate so they can be added
-without replacing this UI.
+Until those steps are complete, the daemon currently emits lifecycle events only; it does not continuously capture audio or conduct live conversations.
