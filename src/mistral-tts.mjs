@@ -100,24 +100,26 @@ export async function playStreamingSpeech({ audioBackend, signal, ...streamOptio
     throw new Error('audioBackend.writeOutput is required');
   }
 
-  let trailingByte;
+  let trailingBytes = Buffer.alloc(0);
   for await (const pcmChunk of streamSpeech({ ...streamOptions, signal })) {
     if (signal?.aborted) return;
-    const bytes = trailingByte === undefined
+    const bytes = trailingBytes.length === 0
       ? pcmChunk
-      : Buffer.concat([Buffer.from([trailingByte]), pcmChunk]);
-    trailingByte = bytes.length % 2 === 0 ? undefined : bytes.at(-1);
-    const sampleBytes = trailingByte === undefined ? bytes : bytes.subarray(0, -1);
+      : Buffer.concat([trailingBytes, pcmChunk]);
+    const sampleByteLength = bytes.length - (bytes.length % 4);
+    trailingBytes = bytes.subarray(sampleByteLength);
+    const sampleBytes = bytes.subarray(0, sampleByteLength);
     if (sampleBytes.length === 0 || signal?.aborted) continue;
-    audioBackend.writeOutput(pcm16ToFloat32(sampleBytes));
+    audioBackend.writeOutput(float32LeToFloat32(sampleBytes));
     if (signal?.aborted) return;
   }
 }
 
-function pcm16ToFloat32(bytes) {
-  const output = new Float32Array(bytes.length / 2);
-  for (let offset = 0; offset < bytes.length; offset += 2) {
-    output[offset / 2] = bytes.readInt16LE(offset) / 32768;
+function float32LeToFloat32(bytes) {
+  const output = new Float32Array(bytes.length / 4);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let offset = 0; offset < bytes.length; offset += 4) {
+    output[offset / 4] = view.getFloat32(offset, true);
   }
   return output;
 }

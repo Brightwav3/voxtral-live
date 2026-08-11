@@ -84,17 +84,22 @@ test('returns structured secret-safe errors for provider failures and malformed 
     && !error.message.includes('test-key'));
 });
 
-test('plays streamed PCM chunks through the audio backend incrementally and stops after abort', async () => {
+test('plays streamed float32 PCM chunks through the audio backend and stops after abort', async () => {
   const abortController = new AbortController();
   const written = [];
   let requestUrl;
   let releaseSecondEvent;
   const secondEvent = new Promise((resolve) => { releaseSecondEvent = resolve; });
+  const firstPcm = Buffer.alloc(8);
+  firstPcm.writeFloatLE(0.25, 0);
+  firstPcm.writeFloatLE(-0.5, 4);
+  const secondPcm = Buffer.alloc(4);
+  secondPcm.writeFloatLE(0.75, 0);
   const body = new ReadableStream({
     async start(streamController) {
-      streamController.enqueue(new TextEncoder().encode('data: {"audio_data":"AAD/fw=="}\n\n'));
+      streamController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ audio_data: firstPcm.toString('base64') })}\n\n`));
       await secondEvent;
-      streamController.enqueue(new TextEncoder().encode('data: {"audio_data":"AIA="}\n\n'));
+      streamController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ audio_data: secondPcm.toString('base64') })}\n\n`));
       streamController.close();
     },
   });
@@ -120,8 +125,35 @@ test('plays streamed PCM chunks through the audio backend incrementally and stop
 
   assert.equal(requestUrl, 'https://tts.example.test/v1/audio/speech');
   assert.equal(written.length, 1);
-  assert.equal(written[0][0], 0);
-  assert.equal(written[0][1], 32767 / 32768);
+  assert.equal(written[0][0], 0.25);
+  assert.equal(written[0][1], -0.5);
+});
+
+test('reassembles a float32 sample split across streamed audio deltas', async () => {
+  const first = Buffer.alloc(6);
+  first.writeFloatLE(0.25, 0);
+  first.writeUInt16LE(0, 4);
+  const second = Buffer.alloc(6);
+  second.writeUInt16LE(0x3f00, 0);
+  second.writeFloatLE(-0.5, 2);
+  const body = streamFrom([
+    new TextEncoder().encode(`data: ${JSON.stringify({ audio_data: first.toString('base64') })}\n\n`),
+    new TextEncoder().encode(`data: ${JSON.stringify({ audio_data: second.toString('base64') })}\n\n`),
+    new TextEncoder().encode('data: {"type":"speech.audio.done"}\n\n'),
+  ]);
+  const written = [];
+
+  await playStreamingSpeech({
+    apiKey: 'test-key',
+    input: 'Reassemble this',
+    audioBackend: { writeOutput: (frame) => written.push([...frame]) },
+    fetchImpl: async () => new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }),
+  });
+
+  assert.deepEqual(written, [[0.25], [0.5, -0.5]]);
 });
 
 async function collect(stream) {
