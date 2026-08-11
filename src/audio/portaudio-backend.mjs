@@ -18,46 +18,62 @@ export function createPortAudioBackend({ inputDevice, outputDevice, PortAudio } 
   let input;
   let output;
   let queue;
+  let closed = false;
+  let inputStarting = false;
 
   return { startInput, writeOutput, stopOutput, close };
 
   async function startInput(onFrame) {
     if (typeof onFrame !== 'function') throw new Error('onFrame must be a function');
-    if (input) throw new Error('audio input has already started');
-    const audio = await loadPortAudio(PortAudio);
-    input = new audio.AudioIO({
-      inOptions: toAudioOptions(audio, INPUT_OPTIONS, inputDevice),
-    });
-    input.on('data', onFrame);
-    input.start();
+    if (closed) throw new Error('audio backend is closed');
+    if (input || inputStarting) throw new Error('audio input is already starting or started');
+    inputStarting = true;
+    try {
+      const audio = await loadPortAudio(PortAudio);
+      if (closed) return;
+      const nextInput = new audio.AudioIO({
+        inOptions: toAudioOptions(audio, INPUT_OPTIONS, inputDevice),
+      });
+      if (closed) {
+        nextInput.quit();
+        return;
+      }
+      input = nextInput;
+      input.on('data', onFrame);
+      input.start();
+    } finally {
+      inputStarting = false;
+    }
   }
 
   function writeOutput(pcmFloat32Frame) {
     if (!(pcmFloat32Frame instanceof Float32Array)) {
       throw new Error('output frames must be Float32Array instances');
     }
+    if (closed) throw new Error('audio backend is closed');
     if (!queue) queue = createOutputQueue();
     queue.write(pcmFloat32Frame);
   }
 
   function stopOutput() {
     queue?.stopOutput();
+    resetOutput();
   }
 
   async function close() {
+    closed = true;
     stopOutput();
     await queue?.flush();
     input?.quit();
-    output?.quit();
     input = undefined;
-    output = undefined;
     queue = undefined;
   }
 
   function createOutputQueue() {
     return createPlaybackQueue({
-      writeFrame: async (frame) => {
+      writeFrame: async (frame, isCurrent) => {
         const audio = await loadPortAudio(PortAudio);
+        if (closed || !isCurrent()) return;
         if (!output) {
           output = new audio.AudioIO({
             outOptions: toAudioOptions(audio, OUTPUT_OPTIONS, outputDevice),
@@ -67,6 +83,12 @@ export function createPortAudioBackend({ inputDevice, outputDevice, PortAudio } 
         output.write(Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength));
       },
     });
+  }
+
+  function resetOutput() {
+    const activeOutput = output;
+    output = undefined;
+    activeOutput?.quit();
   }
 }
 

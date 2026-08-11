@@ -34,3 +34,32 @@ Implemented the hardware-optional audio boundary, deterministic local VAD, cance
 - No microphone or speaker was opened during automated verification, so a 10-second live loopback must be run on the target Windows hardware before accepting device-driver behavior.
 - `stopOutput()` prevents queued and pre-write stale frames; a PortAudio write that has already entered the driver cannot be cancelled by JavaScript, so the effective interruption bound is one output frame (20 ms at 24 kHz / 480 samples).
 - The audio backend is intentionally not wired into the daemon session yet; later tasks own STT/session integration and call this interface.
+
+## Review fix round 1
+
+### Fixed findings
+
+- **P0: active stale output after cancellation** — `stopOutput()` now increments the queue generation, clears queued frames, and calls `quit()` on the active PortAudio output stream. A generation callback rechecks cancellation after lazy backend loading, so an old frame cannot create or write to a new stream after interruption.
+- **P1: close during lazy input start** — the backend now tracks `closed` and `inputStarting`; duplicate starts reject, closed backends reject new writes/starts, and input/output loading rechecks both closure and generation before stream construction or playback.
+- **P2: unused interruption test** — removed the unused boolean test and replaced it with a fake-PortAudio integration test that drives VAD speech attack, stops real backend output, verifies the original stream is quit, and verifies only fresh audio reaches a replacement stream.
+
+### Added hardware-free lifecycle coverage
+
+- exact input/output PortAudio stream options and device IDs;
+- clean shutdown of input and output streams;
+- close while input startup is pending;
+- concurrent input-start rejection;
+- active-output cancellation and stale-frame discard.
+
+### Fix verification
+
+1. `npm test -- test/audio-backend.test.mjs test/audio-vad.test.mjs test/playback-queue.test.mjs test/daemon-contract.test.mjs`
+   - 19 passing, 0 failing.
+2. `npm test`
+   - 32 passing, 0 failing.
+3. `git diff --check`
+   - no whitespace errors.
+
+### Remaining concern
+
+`quit()` is the available PortAudio stream-reset mechanism used to halt already-buffered device output. The code-level one-frame cancellation path is covered with a fake backend; the driver-level stop latency still requires target Windows hardware validation.

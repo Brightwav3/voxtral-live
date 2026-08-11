@@ -28,7 +28,9 @@ export function createPlaybackQueue({ writeFrame }) {
     (async () => {
       while (queuedFrames.length > 0) {
         const entry = queuedFrames.shift();
-        if (entry.generation === generation) await writeFrame(entry.frame);
+        if (entry.generation === generation) {
+          await writeFrame(entry.frame, () => entry.generation === generation);
+        }
       }
     })().finally(() => {
       draining = false;

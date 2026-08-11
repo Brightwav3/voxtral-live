@@ -53,13 +53,3 @@ test('stops speech after 450 ms of silence', () => {
     speechStopped: true,
   });
 });
-
-test('recognizes a user interruption after playback has started', () => {
-  const vad = createVad({ startRms: 0.05, stopRms: 0.03 });
-  const playbackIsActive = true;
-
-  assert.equal(playbackIsActive, true);
-  assert.equal(vad.push(speechFrame()).speechStarted, false);
-  assert.equal(vad.push(speechFrame()).speechStarted, false);
-  assert.equal(vad.push(speechFrame()).speechStarted, true);
-});
