@@ -5,6 +5,7 @@ export const DEFAULT_TARGET_DELAY_MS = 240;
 
 const REALTIME_URL = 'wss://api.mistral.ai/v1/audio/transcriptions/realtime';
 const MAX_AUDIO_FRAME_BYTES = 262_144;
+const MAX_BUFFERED_AMOUNT = 1_048_576;
 
 export function createRealtimeTranscriber({
   apiKey,
@@ -56,12 +57,14 @@ export function createRealtimeTranscriber({
         try {
           send(nextSocket, {
             type: 'session.update',
-            audio_format: { encoding: 'pcm_s16le', sample_rate: 16000 },
-            target_streaming_delay_ms: targetDelayMs,
+            session: {
+              audio_format: { encoding: 'pcm_s16le', sample_rate: 16000 },
+              target_streaming_delay_ms: targetDelayMs,
+            },
           });
           settle(resolve);
-        } catch {
-          emit('error', providerError('connection_failed'));
+        } catch (error) {
+          emit('error', providerError(sendFailureCode(error, 'connection_failed')));
           settle(reject, new Error('Realtime transcription connection failed'));
         }
       });
@@ -90,8 +93,8 @@ export function createRealtimeTranscriber({
     try {
       send(socket, { type: 'input_audio.append', audio: frame.toString('base64') });
       return true;
-    } catch {
-      emit('error', providerError('send_failed'));
+    } catch (error) {
+      emit('error', providerError(sendFailureCode(error, 'send_failed')));
       return false;
     }
   }
@@ -105,8 +108,8 @@ export function createRealtimeTranscriber({
     if (isOpen(activeSocket, WebSocketImpl) && !inputEnded) {
       try {
         send(activeSocket, { type: 'input_audio.end' });
-      } catch {
-        emit('error', providerError('send_failed'));
+      } catch (error) {
+        emit('error', providerError(sendFailureCode(error, 'send_failed')));
       }
       inputEnded = true;
     }
@@ -167,7 +170,16 @@ function isClosed(socket, WebSocketImpl) {
 }
 
 function send(socket, payload) {
+  if (Number.isFinite(socket.bufferedAmount) && socket.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+    const error = new Error('Realtime transcription socket is backpressured');
+    error.code = 'ERR_REALTIME_BACKPRESSURE';
+    throw error;
+  }
   socket.send(JSON.stringify(payload));
+}
+
+function sendFailureCode(error, fallback) {
+  return error?.code === 'ERR_REALTIME_BACKPRESSURE' ? 'backpressure' : fallback;
 }
 
 function readMessageData(message) {

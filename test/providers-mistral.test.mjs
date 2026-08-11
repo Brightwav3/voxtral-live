@@ -24,6 +24,10 @@ class FakeWebSocket {
 
   send(message) {
     if (this.readyState !== FakeWebSocket.OPEN) throw new Error('socket is not open');
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new Error('send failed');
+    }
     this.sent.push(message);
   }
 
@@ -75,8 +79,10 @@ test('creates a 16 kHz realtime session with the fast default delay', async () =
   assert.deepEqual(socket.options, { headers: { Authorization: 'Bearer test-api-key' } });
   assert.deepEqual(JSON.parse(socket.sent[0]), {
     type: 'session.update',
-    audio_format: { encoding: 'pcm_s16le', sample_rate: 16000 },
-    target_streaming_delay_ms: 240,
+    session: {
+      audio_format: { encoding: 'pcm_s16le', sample_rate: 16000 },
+      target_streaming_delay_ms: 240,
+    },
   });
 });
 
@@ -150,6 +156,39 @@ test('safely drops audio before open and closes the input stream exactly once', 
 
   await transcriber.close();
   assert.deepEqual(JSON.parse(socket.sent[2]), { type: 'input_audio.end' });
+});
+
+test('rejects audio when WebSocket bufferedAmount exceeds the bounded cap', async () => {
+  const transcriber = createSubject();
+  const errors = [];
+  transcriber.on('error', (event) => errors.push(event));
+  const socket = await connect(transcriber);
+  socket.bufferedAmount = 1_048_577;
+
+  assert.equal(transcriber.pushAudio(Buffer.from([1, 2, 3])), false);
+  assert.equal(socket.sent.length, 1);
+  assert.deepEqual(errors, [{
+    event: 'error',
+    code: 'backpressure',
+    message: 'Realtime transcription provider error',
+    recoverable: true,
+  }]);
+});
+
+test('converts a failed WebSocket send into a recoverable sanitized error', async () => {
+  const transcriber = createSubject();
+  const errors = [];
+  transcriber.on('error', (event) => errors.push(event));
+  const socket = await connect(transcriber);
+  socket.failNextSend = true;
+
+  assert.equal(transcriber.pushAudio(Buffer.from([4, 5, 6])), false);
+  assert.deepEqual(errors, [{
+    event: 'error',
+    code: 'send_failed',
+    message: 'Realtime transcription provider error',
+    recoverable: true,
+  }]);
 });
 
 test('loads --stt-delay-ms and rejects invalid delay values', () => {
