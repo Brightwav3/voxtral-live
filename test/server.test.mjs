@@ -27,14 +27,14 @@ test('serves a health response', async () => {
   });
 });
 
-test('serves the Voxtral Studio product shell', async () => {
+test('does not publish the browser development harness', async () => {
   await withServer(async () => {
     throw new Error('Mistral must not be called');
   }, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/`);
 
-    assert.equal(response.status, 200);
-    assert.match(await response.text(), /Voxtral Studio/);
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: 'Not found' });
   });
 });
 
