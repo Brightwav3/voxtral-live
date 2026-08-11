@@ -55,3 +55,21 @@ test('deduplicates a finalized transcript that arrives after it has emitted', as
 
   assert.deepEqual(turns, [{ text: 'Do not repeat this' }]);
 });
+
+test('allows the same normalized text in a later turn after a new silence window', async (t) => {
+  t.mock.timers.enable(['setTimeout']);
+  const controller = createTurnController({ silenceMs: 550 });
+  const turns = [];
+  controller.on('turn', (turn) => turns.push(turn));
+
+  controller.pushFinal('Say that again');
+  t.mock.timers.tick(550);
+  t.mock.timers.tick(550);
+  controller.pushFinal('  Say  that again  ');
+  t.mock.timers.tick(550);
+
+  assert.deepEqual(turns, [
+    { text: 'Say that again' },
+    { text: 'Say that again' },
+  ]);
+});

@@ -49,3 +49,25 @@ All five review findings were fixed and covered with regression tests.
 ### Concerns
 
 - The deterministic summary still truncates prior context; it does not semantically summarize it with another model call.
+
+## Fix Round 2
+
+### Status
+
+Fixed the re-review regression in turn deduplication.
+
+### Changes
+
+- Scoped duplicate-final suppression to one silence window after a turn emits.
+- Added a deterministic fake-timer regression proving that identical normalized text can emit again in a later turn after a new silence window.
+
+### Test Commands and Output
+
+1. `npm test -- test/turn-controller.test.mjs test/sentence-chunker.test.mjs test/mistral-chat.test.mjs`
+   - Exit 0; 16 passed, 0 failed.
+2. `npm test`
+   - Exit 0; 56 passed, 0 failed.
+
+### Concerns
+
+- The duplicate-suppression window is intentionally tied to `silenceMs`; callers requiring a distinct provider event identifier would need to expose one in the controller API.

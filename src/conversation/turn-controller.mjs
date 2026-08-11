@@ -6,6 +6,7 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
   let pendingFinal = '';
   let lastEmitted = '';
   let timer;
+  let dedupeTimer;
 
   return { pushPartial, pushFinal, on, reset };
 
@@ -34,7 +35,9 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
 
   function reset() {
     clearTimeout(timer);
+    clearTimeout(dedupeTimer);
     timer = undefined;
+    dedupeTimer = undefined;
     pendingFinal = '';
     lastEmitted = '';
   }
@@ -45,6 +48,11 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
     pendingFinal = '';
     if (!text) return;
     lastEmitted = text;
+    clearTimeout(dedupeTimer);
+    dedupeTimer = setTimeout(() => {
+      lastEmitted = '';
+      dedupeTimer = undefined;
+    }, silenceMs);
     for (const handler of handlers.get('turn') ?? []) handler({ text });
   }
 }
