@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
+export { streamSpeech } from './providers/mistral-tts-stream.mjs';
+
 export const DEFAULT_MODEL = 'voxtral-mini-tts-latest';
 export const DEFAULT_BASE_URL = 'https://api.mistral.ai';
 
