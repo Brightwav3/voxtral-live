@@ -1,6 +1,7 @@
 const DEFAULTS = {
   mode: 'always-on',
   sttModel: 'voxtral-mini-transcribe-realtime-2602',
+  sttDelayMs: 240,
   llmModel: 'mistral-small-latest',
   ttsModel: 'voxtral-mini-tts-latest',
 };
@@ -13,6 +14,7 @@ export function loadConfig(env = process.env, argv = []) {
     apiKey,
     mode,
     sttModel: cleanOptional(env.MISTRAL_STT_MODEL) ?? DEFAULTS.sttModel,
+    sttDelayMs: readPositiveInteger(argv, '--stt-delay-ms', DEFAULTS.sttDelayMs),
     llmModel: cleanOptional(env.MISTRAL_LLM_MODEL) ?? DEFAULTS.llmModel,
     ttsModel: cleanOptional(env.MISTRAL_TTS_MODEL) ?? DEFAULTS.ttsModel,
     voiceId: cleanOptional(env.MISTRAL_VOICE_ID),
@@ -21,6 +23,18 @@ export function loadConfig(env = process.env, argv = []) {
     sampleRate: 16000,
     frameMs: 20,
   };
+}
+
+function readPositiveInteger(argv, flag, defaultValue) {
+  const index = argv.findIndex((argument) => argument === flag || argument.startsWith(`${flag}=`));
+  if (index === -1) return defaultValue;
+  const argument = argv[index];
+  const value = argument === flag ? argv[index + 1] : argument.slice(flag.length + 1);
+  if (!value || value.startsWith('--')) throw invalidCliArgument('missing_value', `${flag} requires a positive integer`, flag);
+  if (!/^\d+$/.test(value) || Number(value) <= 0) {
+    throw invalidCliArgument('invalid_value', `${flag} must be a positive integer`, flag);
+  }
+  return Number(value);
 }
 
 function readDeviceId(argv, flag) {
