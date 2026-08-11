@@ -1,7 +1,8 @@
 const SECRET_KEYS = /(?:api[-_]?key|authorization|password|secret|token)/i;
 const REDACTED = '[REDACTED]';
+const defaultWrite = process.stdout.write.bind(process.stdout);
 
-export function emitEvent(event, write = process.stdout.write) {
+export function emitEvent(event, write = defaultWrite) {
   const redacted = redactEvent(event);
   write(`${JSON.stringify(redacted)}\n`);
 }

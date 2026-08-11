@@ -36,7 +36,9 @@ are `daemon_started` with `sessionId` and `mode`, followed by `listening` with
 turn and error events. Events never include the API key, raw microphone audio,
 or full provider payloads.
 
-The `control` command is reserved for the local IPC control layer:
+The `control` command is reserved for the local IPC control layer. In Task 1
+it exits with a structured `control_not_implemented` error; it does not start
+another daemon. IPC commands are added in Task 8:
 
 ```powershell
 npm run control -- status

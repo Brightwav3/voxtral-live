@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { resolve } from 'node:path';
 
 import { loadConfig } from '../src/config.mjs';
 import { emitEvent } from '../src/events.mjs';
@@ -15,6 +18,15 @@ test('rejects an invalid daemon mode', () => {
   assert.throws(
     () => loadConfig({ MISTRAL_API_KEY: 'test-key', VOXTRAL_MODE: 'sometimes' }),
     /VOXTRAL_MODE must be always-on or push-to-talk/,
+  );
+});
+
+test('rejects bare --mode with a structured CLI error', () => {
+  assert.throws(
+    () => loadConfig({ MISTRAL_API_KEY: 'test-key', VOXTRAL_MODE: 'push-to-talk' }, ['--mode']),
+    (error) => error.code === 'ERR_INVALID_CLI_ARGUMENT'
+      && error.argument === '--mode'
+      && error.reason === 'missing_value',
   );
 });
 
@@ -47,5 +59,42 @@ test('emits JSONL events without secret values', () => {
     message: 'request failed with [REDACTED]',
     apiKey: '[REDACTED]',
     nested: { authorization: '[REDACTED]' },
+  });
+});
+
+test('runs the daemon entrypoint and emits JSONL to stdout', async () => {
+  const child = spawn(process.execPath, [resolve('src/daemon.mjs'), '--once'], {
+    cwd: process.cwd(),
+    env: { ...process.env, MISTRAL_API_KEY: 'smoke-key' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const output = [];
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    output.push(...chunk.split('\n').filter(Boolean));
+  });
+
+  const [exitCode] = await once(child, 'close');
+  assert.equal(exitCode, 0);
+  assert.deepEqual(output.map((line) => JSON.parse(line).event), ['daemon_started', 'listening']);
+  assert.doesNotMatch(output.join('\n'), /smoke-key/);
+});
+
+test('makes the control placeholder explicit without starting a daemon', async () => {
+  const child = spawn(process.execPath, [resolve('src/daemon.mjs'), '--control', 'status'], {
+    cwd: process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { output += chunk; });
+
+  const [exitCode] = await once(child, 'close');
+  assert.equal(exitCode, 2);
+  assert.deepEqual(JSON.parse(output), {
+    event: 'error',
+    code: 'control_not_implemented',
+    recoverable: false,
+    message: 'Local control is not implemented until Task 8.',
   });
 });

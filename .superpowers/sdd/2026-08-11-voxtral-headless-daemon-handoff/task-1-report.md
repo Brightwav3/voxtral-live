@@ -27,3 +27,18 @@ redacts secret fields and secret values.
   IPC client in Task 8.
 - Audio devices, realtime provider adapters, and full daemon session behavior
   are intentionally deferred to later tasks.
+
+## Round 1 fixes
+
+- Bound the default stdout writer in both the daemon entrypoint and event
+  emitter; added an entrypoint smoke test using `--once`.
+- Bare `--mode` now throws `ERR_INVALID_CLI_ARGUMENT` with `argument` and
+  `reason` fields instead of falling back to `VOXTRAL_MODE`.
+- Kept the required `control` npm script, but it now emits
+  `control_not_implemented` and exits with status 2 without starting a daemon;
+  local IPC remains Task 8 scope.
+
+### Fix test commands and output
+
+- `npm test -- test/daemon-contract.test.mjs` — 7 passed, 0 failed.
+- `npm test` — 20 passed, 0 failed.

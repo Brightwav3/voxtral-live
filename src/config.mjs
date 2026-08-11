@@ -23,18 +23,34 @@ export function loadConfig(env = process.env, argv = []) {
 
 function readMode(env, argv) {
   const modeArgumentIndex = argv.findIndex((argument) => argument === '--mode' || argument.startsWith('--mode='));
-  const argumentMode = modeArgumentIndex === -1
-    ? undefined
-    : argv[modeArgumentIndex].startsWith('--mode=')
-      ? argv[modeArgumentIndex].slice('--mode='.length)
-      : argv[modeArgumentIndex + 1];
+  let argumentMode;
+  if (modeArgumentIndex !== -1) {
+    const argument = argv[modeArgumentIndex];
+    if (argument === '--mode') {
+      const nextArgument = argv[modeArgumentIndex + 1];
+      if (!nextArgument || nextArgument.startsWith('--')) {
+        throw invalidCliArgument('missing_value');
+      }
+      argumentMode = nextArgument;
+    } else {
+      argumentMode = argument.slice('--mode='.length);
+    }
+  }
   const mode = argumentMode ?? cleanOptional(env.VOXTRAL_MODE) ?? DEFAULTS.mode;
 
   if (!['always-on', 'push-to-talk'].includes(mode)) {
-    throw new Error('VOXTRAL_MODE must be always-on or push-to-talk');
+    throw invalidCliArgument('invalid_value', 'VOXTRAL_MODE must be always-on or push-to-talk');
   }
 
   return mode;
+}
+
+function invalidCliArgument(reason, message = 'The --mode argument is invalid') {
+  const error = new Error(message);
+  error.code = 'ERR_INVALID_CLI_ARGUMENT';
+  error.argument = '--mode';
+  error.reason = reason;
+  return error;
 }
 
 function cleanRequired(value) {
