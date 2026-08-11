@@ -1,16 +1,20 @@
-# Mistral Voxtral headless daemon
+# Voxtral Live
 
-Voxtral runs as one local Windows voice daemon. Microphone PCM streams to
-Voxtral Realtime STT, finalized turns stream through Mistral chat, and
-sentence-sized output streams to Voxtral TTS and the selected speaker. Local
-VAD can cancel an in-flight LLM/TTS generation before transcription finishes.
+Voxtral Live is a headless Windows voice daemon: microphone PCM streams to
+Voxtral Realtime STT, completed turns stream through Mistral chat, and
+sentence-sized output streams through Voxtral TTS to the selected speaker.
+Local VAD can cancel active LLM/TTS work for barge-in. It is inspired by GPT
+Live 1, but is independent and not affiliated with OpenAI.
 
-The browser files under `public/` are a development harness. They are not
-required by the daemon and the daemon exposes no network port.
+Normal operation needs no browser window and opens no network listener. The
+files under `public/` are a development harness only.
 
-## Setup
+## Windows setup
 
-Use Node.js 20.6 or newer and create a private `.env` in the project root:
+1. Install Node.js 20.6 or newer and run `npm install`.
+2. Copy `.env.example` to a private `.env`; never commit it.
+3. Set the required key and, if needed, model overrides.
+4. Start with a headset profile: `npm run daemon`.
 
 ```dotenv
 MISTRAL_API_KEY=your-key
@@ -21,45 +25,41 @@ MISTRAL_TTS_MODEL=voxtral-mini-tts-latest
 MISTRAL_VOICE_ID=optional-voice-id
 ```
 
-`MISTRAL_API_KEY` is required. `VOXTRAL_MODE` is `always-on` by default or
-`push-to-talk`. An optional `VOXTRAL_SEARCH_ENDPOINT` may point to an
-application-owned JSON search service that accepts
-`{ "query": string, "recencyDays"?: number }` and returns a JSON array (or a
-`results` array) containing only `title`, `url`, `snippet`, and `publishedAt`.
+`MISTRAL_API_KEY` is required. `VOXTRAL_MODE` accepts `always-on` (default) or
+`push-to-talk`. `VOXTRAL_SEARCH_ENDPOINT` is optional and must be an
+application-owned JSON endpoint accepting `{ "query": string, "recencyDays"?:
+number }`; it may return only normalized `title`, `url`, `snippet`, and
+`publishedAt` fields.
 
-Install dependencies and start the reliable headset profile:
+## Commands and devices
 
 ```powershell
-npm install
 npm run daemon
-```
-
-Select devices and models without changing code:
-
-```powershell
-npm run daemon -- --input-device 2 --output-device 7 --stt-delay-ms 240
-$env:MISTRAL_LLM_MODEL = 'mistral-small-latest'
-npm run daemon
-```
-
-Speaker playback can re-enter the microphone. It is therefore rejected unless
-echo cancellation is explicitly enabled:
-
-```powershell
+npm run daemon -- --mode push-to-talk --input-device 13 --output-device 19
+npm run daemon -- --stt-delay-ms 240
 npm run daemon -- --audio-profile speaker --echo-cancel
 ```
 
-The bundled speaker profile compares microphone frames with a rolling 500 ms
-downsampled playback reference and suppresses strongly correlated echo. Room
-acoustics and device latency still vary; use a headset for the most dependable
-barge-in behavior.
+Device IDs are machine-specific. List PortAudio devices before selecting them:
 
-## Local control
+```powershell
+node -e "console.log(require('naudiodon2').getDevices())"
+```
 
-The daemon owns a SID-qualified per-user named pipe such as
-`\\.\pipe\voxtral-daemon-S-1-5-21-...`. Frames are
-newline-delimited JSON requests/responses; no TCP port is opened. Only one
-daemon can bind the pipe.
+Headset mode is the supported default. Speaker mode is rejected unless
+`--echo-cancel` is supplied; its rolling-reference suppressor is not a full
+acoustic echo canceller and needs device-specific validation.
+
+Model selection is environment-driven. Set `MISTRAL_STT_MODEL`,
+`MISTRAL_LLM_MODEL`, or `MISTRAL_TTS_MODEL` in `.env` (or the process
+environment) and restart the daemon. `MISTRAL_VOICE_ID` selects an optional
+voice.
+
+## Local IPC and service lifecycle
+
+The daemon owns one SID-qualified, per-user named pipe such as
+`\\.\pipe\voxtral-daemon-S-1-5-21-...`. Requests and responses are
+newline-delimited JSON; no TCP port is opened.
 
 ```powershell
 npm run control -- status
@@ -69,46 +69,52 @@ npm run control -- stop
 ```
 
 After `npm link`, the equivalent commands are `voxtral status`, `voxtral say
-TEXT`, `voxtral interrupt`, and `voxtral stop`. `stop` requests a clean shutdown
-that releases microphone and speaker resources. New control clients receive a
-structured `shutting_down` error while shutdown is in progress.
+TEXT`, `voxtral interrupt`, and `voxtral stop`. `stop` waits for clean session,
+microphone, and speaker cleanup. New requests receive a structured
+`shutting_down` error once shutdown begins.
 
-Final assistant events include a structured `citations` array. Search workers
-are tagged with `conversationId` and `turnId`; barge-in or a newer turn aborts
-and discards stale results. TTS receives citation text without raw URLs.
-
-## Start after Windows login
-
-The installer creates a Windows Scheduled Task under the current user. It does
-not copy or print `.env`; the daemon reads the existing project `.env` at run
-time. Logs go to `%LOCALAPPDATA%\Voxtral\logs`.
+Install the login-start Scheduled Task only on a target machine:
 
 ```powershell
 npm run service:install -- -StartNow
 npm run service:uninstall
 ```
 
-The task starts after interactive login, prevents duplicate instances, and
-retries three times at one-minute intervals after a crash. For recovery, run
-`voxtral status`, inspect the redacted logs, then use Task Scheduler to start
-`Voxtral Daemon` or run `npm run daemon` in the project directory. Use
-`voxtral stop` for a graceful service stop. Uninstall preserves logs unless
-`scripts/uninstall-windows-service.ps1 -RemoveLogs` is requested.
+It runs under the current user after interactive login, prevents duplicates,
+retries three times at one-minute intervals after a crash, and writes logs to
+`%LOCALAPPDATA%\Voxtral\logs`. It does not copy, print, or persist `.env`.
+For recovery, run `voxtral status`, inspect redacted logs, then start
+`Voxtral Daemon` in Task Scheduler or run `npm run daemon` directly.
 
-Events and errors are JSONL. Secret-shaped fields and the configured Mistral
-API key are redacted; raw microphone audio, provider payloads, authorization
-headers, and `.env` contents are never logged. Do not add raw provider bodies
-to diagnostics.
+## Privacy and architecture
 
-## Deterministic tests
+Events and errors are JSONL. The configured API key and secret-shaped fields
+are redacted; raw microphone audio, provider payloads, authorization headers,
+and `.env` contents must never be logged. Do not add raw provider bodies to
+diagnostics.
 
-```powershell
-npm test -- test/session.test.mjs test/delegation.test.mjs test/control-ipc.test.mjs
-npm test
+```text
+PortAudio input -> VAD/session -> Realtime STT -> streaming chat -> sentence queue -> streaming TTS -> PortAudio output
+                         |              |               |
+                         +-- generation/AbortController +-- local named-pipe control
 ```
 
-Tests inject audio, search, network, and pipe-facing interfaces; they require no
-live microphone, speaker, API key, or search service.
+The session assigns every turn a `turnId` and `generationId`; stale work is
+discarded after barge-in. Search jobs carry the same identities, return
+structured citations, and omit raw URLs from TTS-facing text. The architectural
+rationale is in [ADR-001](docs/decisions/ADR-001-headless-background-daemon.md).
+
+## Testing
+
+```powershell
+npm test
+npm test -- test/providers-mistral.test.mjs test/tts-stream.test.mjs
+```
+
+Tests inject audio, search, provider/network, and pipe interfaces, so they do
+not need a live microphone, speaker, API key, or browser. The fragmented SSE
+fixture at `test/fixtures/tts-stream-events.ndjson` is consumed by the TTS
+stream parser test to guard arbitrary event-boundary handling.
 
 The existing batch tools remain available:
 
@@ -117,5 +123,15 @@ npm run tts -- "Hello" --voice-id VOICE_ID --output output.mp3
 npm run transcribe -- sample.mp3 --language en
 ```
 
-Voice cloning must only be used with appropriate consent and in accordance
-with Mistral's usage policy.
+## Limitations
+
+- Czech is unsupported by the default Mistral speech profile and is not
+  production-ready. Use a separately validated Czech STT/TTS provider before
+  offering Czech conversations.
+- A headset is the reliable barge-in configuration. Speaker-mode thresholds,
+  driver buffering, and echo behavior require per-device tuning.
+- Live model availability and credentials remain provider-dependent. See
+  [Task 9 handoff](docs/task-9-verification-handoff.md) for the recorded live
+  checks and unverified scenarios.
+- Voice cloning requires appropriate consent and compliance with Mistral's
+  usage policy.

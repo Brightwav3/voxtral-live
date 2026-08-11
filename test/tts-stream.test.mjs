@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import { streamSpeech } from '../src/providers/mistral-tts-stream.mjs';
 import { playStreamingSpeech } from '../src/mistral-tts.mjs';
@@ -7,12 +8,7 @@ import { playStreamingSpeech } from '../src/mistral-tts.mjs';
 test('streams decoded PCM chunks from SSE events split across arbitrary byte boundaries', async () => {
   let request;
   const encoded = new TextEncoder();
-  const source = [
-    'data: {"audio_data":"AQI',
-    '="}\n\n',
-    'data: {"audio_data":"AwQ="}\n\n',
-    'data: [DONE]\n\n',
-  ];
+  const source = await readFragmentedSseFixture();
   const body = streamFrom(source.map((part) => encoded.encode(part)));
   const chunks = [];
 
@@ -139,4 +135,9 @@ function streamFrom(chunks) {
       controller.close();
     },
   });
+}
+
+async function readFragmentedSseFixture() {
+  const fixture = await readFile(new URL('./fixtures/tts-stream-events.ndjson', import.meta.url), 'utf8');
+  return fixture.trimEnd().split(/\r?\n/).map((line) => JSON.parse(line).chunk);
 }
