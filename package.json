@@ -8,6 +8,8 @@
     "test": "node --test",
     "tts": "node --env-file=.env src/cli.mjs",
     "transcribe": "node --env-file=.env src/transcribe-cli.mjs",
+    "daemon": "node --env-file=.env src/daemon.mjs",
+    "control": "node --env-file=.env src/daemon.mjs --control",
     "dev": "node --env-file=.env src/server.mjs",
     "start": "node --env-file=.env src/server.mjs"
   },

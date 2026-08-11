@@ -1,14 +1,46 @@
-# Mistral Voxtral TTS
+# Mistral Voxtral
 
-Voxtral Studio is a local-first voice workbench for Mistral's Voxtral models.
-It keeps your API key on the Node server and gives you a browser UI for voice
-generation, voice selection, voice cloning, and audio transcription.
+The primary runtime is a headless Voxtral daemon. The existing browser UI is
+kept as a development harness for the batch TTS and transcription adapters.
 
 ## Setup
 
-1. Open `.env`.
-2. Put your Mistral API key after `MISTRAL_API_KEY=`.
-3. Keep `.env` private; it is excluded by `.gitignore`.
+Create a private `.env` file with these exact keys:
+
+```dotenv
+MISTRAL_API_KEY=your-key
+VOXTRAL_MODE=always-on
+MISTRAL_STT_MODEL=voxtral-mini-transcribe-realtime-2602
+MISTRAL_LLM_MODEL=mistral-small-latest
+MISTRAL_TTS_MODEL=voxtral-mini-tts-latest
+MISTRAL_VOICE_ID=optional-voice-id
+```
+
+`MISTRAL_API_KEY` is required and empty values are rejected. `VOXTRAL_MODE`
+may be `always-on` (the default) or `push-to-talk`; `--mode` on the command
+line overrides the environment value. Keep `.env` private; it is excluded by
+`.gitignore`.
+
+## Headless daemon
+
+Start the daemon with:
+
+```powershell
+npm run daemon
+npm run daemon -- --mode push-to-talk
+```
+
+The daemon emits one JSON object per line (JSONL) to stdout. Initial events
+are `daemon_started` with `sessionId` and `mode`, followed by `listening` with
+`sessionId`. Future control and audio layers extend this event stream with
+turn and error events. Events never include the API key, raw microphone audio,
+or full provider payloads.
+
+The `control` command is reserved for the local IPC control layer:
+
+```powershell
+npm run control -- status
+```
 
 ```powershell
 npm run tts -- "Ahoj, tohle mluví Voxtral." --voice-id VOICE_ID
