@@ -38,9 +38,29 @@ test('loads the default daemon configuration', () => {
     llmModel: 'mistral-small-latest',
     ttsModel: 'voxtral-mini-tts-latest',
     voiceId: undefined,
+    inputDevice: undefined,
+    outputDevice: undefined,
     sampleRate: 16000,
     frameMs: 20,
   });
+});
+
+test('loads optional PortAudio device IDs from CLI flags', () => {
+  assert.deepEqual(
+    loadConfig({ MISTRAL_API_KEY: 'test-key' }, ['--input-device', '2', '--output-device=7']),
+    {
+      apiKey: 'test-key',
+      mode: 'always-on',
+      sttModel: 'voxtral-mini-transcribe-realtime-2602',
+      llmModel: 'mistral-small-latest',
+      ttsModel: 'voxtral-mini-tts-latest',
+      voiceId: undefined,
+      inputDevice: 2,
+      outputDevice: 7,
+      sampleRate: 16000,
+      frameMs: 20,
+    },
+  );
 });
 
 test('emits JSONL events without secret values', () => {

@@ -16,9 +16,21 @@ export function loadConfig(env = process.env, argv = []) {
     llmModel: cleanOptional(env.MISTRAL_LLM_MODEL) ?? DEFAULTS.llmModel,
     ttsModel: cleanOptional(env.MISTRAL_TTS_MODEL) ?? DEFAULTS.ttsModel,
     voiceId: cleanOptional(env.MISTRAL_VOICE_ID),
+    inputDevice: readDeviceId(argv, '--input-device'),
+    outputDevice: readDeviceId(argv, '--output-device'),
     sampleRate: 16000,
     frameMs: 20,
   };
+}
+
+function readDeviceId(argv, flag) {
+  const index = argv.findIndex((argument) => argument === flag || argument.startsWith(`${flag}=`));
+  if (index === -1) return undefined;
+  const argument = argv[index];
+  const value = argument === flag ? argv[index + 1] : argument.slice(flag.length + 1);
+  if (!value || value.startsWith('--')) throw invalidCliArgument('missing_value', `${flag} requires a device ID`, flag);
+  if (!/^\d+$/.test(value)) throw invalidCliArgument('invalid_value', `${flag} must be a non-negative integer`, flag);
+  return Number(value);
 }
 
 function readMode(env, argv) {
@@ -45,10 +57,10 @@ function readMode(env, argv) {
   return mode;
 }
 
-function invalidCliArgument(reason, message = 'The --mode argument is invalid') {
+function invalidCliArgument(reason, message = 'The --mode argument is invalid', argument = '--mode') {
   const error = new Error(message);
   error.code = 'ERR_INVALID_CLI_ARGUMENT';
-  error.argument = '--mode';
+  error.argument = argument;
   error.reason = reason;
   return error;
 }

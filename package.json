@@ -15,5 +15,8 @@
   },
   "engines": {
     "node": ">=20.6"
+  },
+  "dependencies": {
+    "naudiodon2": "2.5.0"
   }
 }
