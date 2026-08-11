@@ -75,7 +75,7 @@ export function startDaemon({
     tools: [WEB_SEARCH_TOOL],
   }));
   const speak = dependencies.speak ?? ((options) => playStreamingSpeech({
-    ...options,
+    ...toStreamingSpeechOptions(options),
     apiKey: config.apiKey,
     model: config.ttsModel,
     voiceId: config.voiceId,
@@ -178,6 +178,10 @@ export function startDaemon({
     })();
     return cleanupPromise;
   }
+}
+
+export function toStreamingSpeechOptions({ text, ...options } = {}) {
+  return { ...options, input: text };
 }
 
 function safeErrorCode(code, fallback) {

@@ -123,3 +123,28 @@ The default-model mismatch is corrected, but it did not remove the live
 `invalid_input` rejection in the daemon streaming path. Spoken-output and
 barge-in validation remain UNVERIFIED; compare the redacted daemon request
 shape with the known-good direct request before another provider change.
+
+## Follow-up: streaming terminal event and daemon input mapping
+
+Mistral streaming TTS emits `speech.audio.delta` events with `audio_data`, then
+`speech.audio.done` with usage metadata and no audio. The parser now terminates
+on the done event before validating `audio_data`. The fixture regression covers
+fragmented delta events followed by the terminal payload. A second daemon-boundary
+regression ensures session `{ text }` is mapped to the streaming adapter's
+required `{ input }` field.
+
+Fresh evidence on 2026-08-12:
+
+- `npm test`: PASS, 89 passed and 0 failed in 537.190 ms.
+- Direct live `playStreamingSpeech` with `voxtral-mini-tts-2603` and the Paul
+  preset completed: 3 audio writes, 53,760 samples, no error.
+- Fresh push-to-talk daemon on devices 13/19 ran with neither model nor voice
+  environment overrides. `say` and `stop` exited 0, as did the daemon process.
+  Events were `daemon_started`, `listening`, `assistant_started`,
+  `assistant_audio_started`, `assistant_final`, `listening`, and
+  `daemon_stopped`; no provider error was emitted.
+- Captured stdout/stderr contained neither the configured API key nor `Bearer `
+  headers.
+
+This validates the direct and daemon `say` streaming paths. Multi-turn and
+20-second barge-in acceptance scenarios remain separately UNVERIFIED.

@@ -6,13 +6,21 @@ import { resolve } from 'node:path';
 
 import { loadConfig } from '../src/config.mjs';
 import { emitEvent } from '../src/events.mjs';
-import { startDaemon } from '../src/daemon.mjs';
+import { startDaemon, toStreamingSpeechOptions } from '../src/daemon.mjs';
 
 test('rejects a missing MISTRAL_API_KEY', () => {
   assert.throws(
     () => loadConfig({ MISTRAL_API_KEY: '   ' }),
     /MISTRAL_API_KEY is required/,
   );
+});
+
+test('maps session speech text to the streaming TTS input field', () => {
+  const signal = new AbortController().signal;
+  assert.deepEqual(toStreamingSpeechOptions({ text: 'Manual speech', signal }), {
+    input: 'Manual speech',
+    signal,
+  });
 });
 
 test('rejects an invalid daemon mode', () => {

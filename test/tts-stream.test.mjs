@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { streamSpeech } from '../src/providers/mistral-tts-stream.mjs';
 import { playStreamingSpeech } from '../src/mistral-tts.mjs';
 
-test('streams decoded PCM chunks from SSE events split across arbitrary byte boundaries', async () => {
+test('streams fragmented audio deltas and terminates at speech.audio.done', async () => {
   let request;
   const encoded = new TextEncoder();
   const source = await readFragmentedSseFixture();

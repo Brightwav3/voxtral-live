@@ -42,7 +42,7 @@ export async function* streamSpeech({
   if (!response?.ok || !response.body) throw ttsError('tts_request_failed', 'Mistral TTS request failed');
 
   for await (const event of readServerSentEvents(response.body, signal)) {
-    if (signal?.aborted || event === '[DONE]') return;
+    if (signal?.aborted || event === '[DONE]' || event?.type === 'speech.audio.done') return;
     const audioData = event?.audio_data;
     if (typeof audioData !== 'string' || !isBase64(audioData)) {
       throw ttsError('invalid_stream', 'Mistral TTS stream failed');
