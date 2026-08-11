@@ -1,0 +1,17 @@
+{
+  "name": "mistral-tts-integration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal Mistral Voxtral TTS API integration",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "tts": "node --env-file=.env src/cli.mjs",
+    "transcribe": "node --env-file=.env src/transcribe-cli.mjs",
+    "dev": "node --env-file=.env src/server.mjs",
+    "start": "node --env-file=.env src/server.mjs"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

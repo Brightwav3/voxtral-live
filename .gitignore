@@ -1,0 +1,5 @@
+node_modules/
+.env
+output.*
+prototype-test.mp3
+product-test.mp3
