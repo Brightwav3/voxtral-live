@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { streamSpeech } from '../src/providers/mistral-tts-stream.mjs';
+import { playStreamingSpeech } from '../src/mistral-tts.mjs';
 
 test('streams decoded PCM chunks from SSE events split across arbitrary byte boundaries', async () => {
   let request;
@@ -85,6 +86,46 @@ test('returns structured secret-safe errors for provider failures and malformed 
     && error.recoverable === true
     && error.message === 'Mistral TTS stream failed'
     && !error.message.includes('test-key'));
+});
+
+test('plays streamed PCM chunks through the audio backend incrementally and stops after abort', async () => {
+  const abortController = new AbortController();
+  const written = [];
+  let requestUrl;
+  let releaseSecondEvent;
+  const secondEvent = new Promise((resolve) => { releaseSecondEvent = resolve; });
+  const body = new ReadableStream({
+    async start(streamController) {
+      streamController.enqueue(new TextEncoder().encode('data: {"audio_data":"AAD/fw=="}\n\n'));
+      await secondEvent;
+      streamController.enqueue(new TextEncoder().encode('data: {"audio_data":"AIA="}\n\n'));
+      streamController.close();
+    },
+  });
+  const audioBackend = {
+    writeOutput(frame) {
+      written.push([...frame]);
+      abortController.abort();
+      releaseSecondEvent();
+    },
+  };
+
+  await playStreamingSpeech({
+    apiKey: 'test-key',
+    input: 'Play this',
+    baseUrl: 'https://tts.example.test/',
+    audioBackend,
+    signal: abortController.signal,
+    fetchImpl: async (url) => {
+      requestUrl = url;
+      return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+
+  assert.equal(requestUrl, 'https://tts.example.test/v1/audio/speech');
+  assert.equal(written.length, 1);
+  assert.equal(written[0][0], 0);
+  assert.equal(written[0][1], 32767 / 32768);
 });
 
 async function collect(stream) {

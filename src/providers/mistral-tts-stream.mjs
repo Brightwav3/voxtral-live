@@ -3,6 +3,7 @@ export const DEFAULT_TTS_BASE_URL = 'https://api.mistral.ai';
 
 export async function* streamSpeech({
   apiKey = process.env.MISTRAL_API_KEY,
+  baseUrl = process.env.MISTRAL_BASE_URL ?? DEFAULT_TTS_BASE_URL,
   model = DEFAULT_TTS_MODEL,
   input,
   voiceId,
@@ -10,12 +11,12 @@ export async function* streamSpeech({
   signal,
   fetchImpl = globalThis.fetch,
 } = {}) {
-  validateRequest({ apiKey, model, input, voiceId, refAudio, fetchImpl });
+  validateRequest({ apiKey, baseUrl, model, input, voiceId, refAudio, fetchImpl });
   if (signal?.aborted) return;
 
   let response;
   try {
-    response = await fetchImpl(`${DEFAULT_TTS_BASE_URL}/v1/audio/speech`, {
+    response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/v1/audio/speech`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -51,8 +52,9 @@ export async function* streamSpeech({
   }
 }
 
-function validateRequest({ apiKey, model, input, voiceId, refAudio, fetchImpl }) {
+function validateRequest({ apiKey, baseUrl, model, input, voiceId, refAudio, fetchImpl }) {
   if (typeof apiKey !== 'string' || !apiKey.trim()) throw ttsError('missing_api_key', 'Mistral TTS request failed');
+  if (typeof baseUrl !== 'string' || !baseUrl.trim()) throw ttsError('invalid_base_url', 'Mistral TTS request failed');
   if (typeof model !== 'string' || !model.trim()) throw ttsError('invalid_model', 'Mistral TTS request failed');
   if (typeof input !== 'string' || !input.trim()) throw ttsError('invalid_input', 'Mistral TTS request failed');
   if (voiceId && refAudio) throw ttsError('invalid_voice', 'Mistral TTS request failed');

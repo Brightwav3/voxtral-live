@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
+import { streamSpeech } from './providers/mistral-tts-stream.mjs';
 
-export { streamSpeech } from './providers/mistral-tts-stream.mjs';
+export { streamSpeech };
 
 export const DEFAULT_MODEL = 'voxtral-mini-tts-latest';
 export const DEFAULT_BASE_URL = 'https://api.mistral.ai';
@@ -92,6 +93,33 @@ export async function synthesizeSpeech({
     model,
     responseFormat,
   };
+}
+
+export async function playStreamingSpeech({ audioBackend, signal, ...streamOptions } = {}) {
+  if (!audioBackend || typeof audioBackend.writeOutput !== 'function') {
+    throw new Error('audioBackend.writeOutput is required');
+  }
+
+  let trailingByte;
+  for await (const pcmChunk of streamSpeech({ ...streamOptions, signal })) {
+    if (signal?.aborted) return;
+    const bytes = trailingByte === undefined
+      ? pcmChunk
+      : Buffer.concat([Buffer.from([trailingByte]), pcmChunk]);
+    trailingByte = bytes.length % 2 === 0 ? undefined : bytes.at(-1);
+    const sampleBytes = trailingByte === undefined ? bytes : bytes.subarray(0, -1);
+    if (sampleBytes.length === 0 || signal?.aborted) continue;
+    audioBackend.writeOutput(pcm16ToFloat32(sampleBytes));
+    if (signal?.aborted) return;
+  }
+}
+
+function pcm16ToFloat32(bytes) {
+  const output = new Float32Array(bytes.length / 2);
+  for (let offset = 0; offset < bytes.length; offset += 2) {
+    output[offset / 2] = bytes.readInt16LE(offset) / 32768;
+  }
+  return output;
 }
 
 async function readJsonOrText(response) {

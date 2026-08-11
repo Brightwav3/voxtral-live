@@ -20,3 +20,28 @@ Implemented and verified. The streaming adapter consumes `text/event-stream` inc
 ## Concerns
 
 - The provider contract is covered with deterministic SSE fixtures; live Mistral streaming should be validated separately to confirm the production event field name and PCM stream parameters.
+
+---
+
+## Fix round 1
+
+### Status
+
+Implemented and verified. `playStreamingSpeech` is the production-facing incremental playback helper: it consumes `streamSpeech`, converts little-endian PCM16 chunks to the audio backend's `Float32Array` output frames, and stops before writing further audio when the abort signal fires. It retains at most one trailing PCM byte between chunks.
+
+### Changed files
+
+- `src/mistral-tts.mjs` — exports `playStreamingSpeech` while preserving `synthesizeSpeech` unchanged.
+- `src/providers/mistral-tts-stream.mjs` — accepts `baseUrl`, defaults from `MISTRAL_BASE_URL`, and consistently targets that configured endpoint.
+- `test/tts-stream.test.mjs` — end-to-end fake-fetch/fake-backend coverage proves configured endpoint use, incremental frame delivery, PCM conversion, and no writes after abort.
+
+### Test commands and output
+
+1. `npm test -- test/tts-stream.test.mjs test/mistral-tts.test.mjs`
+   - Passed: 8 tests, 0 failures.
+2. `npm test`
+   - Passed: 60 tests, 0 failures.
+
+### Concerns
+
+- Live provider validation remains useful to confirm the SSE payload schema and PCM sample format exposed by Mistral.
