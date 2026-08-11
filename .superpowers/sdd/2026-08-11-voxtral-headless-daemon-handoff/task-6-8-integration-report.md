@@ -116,3 +116,73 @@ No whitespace errors (Git reported only the repository's LF-to-CRLF warnings)
 - Web search is fully wired but intentionally provider-neutral. It returns a
   structured `search_unavailable` error until `VOXTRAL_SEARCH_ENDPOINT` or an
   injected search implementation is configured.
+
+## Integration fix round 1 — 2026-08-11
+
+### Review findings addressed
+
+- Playback completion is now explicit. The audio backend exposes
+  `flushOutput()`, queued frames remain part of the active `SPEAKING` phase
+  until their device-drain promises settle, and speech detected during that
+  tail follows the normal barge-in path.
+- Speaker-mode echo frames are filtered before the stateful VAD and reset its
+  attack state. Sustained correlated playback no longer latches VAD, while an
+  immediately following non-correlated human frame still starts a barge-in.
+- Realtime STT finals carry the originating `turnId` and `generationId`.
+  Session callbacks require both identities to match the active turn, so a
+  delayed pre-barge final cannot replace a newer result.
+- Daemon startup now acquires named-pipe singleton ownership before opening STT
+  or microphone resources. `daemon_started` is emitted only after ownership,
+  STT, and audio startup all succeed; bind failure starts neither resource.
+- IPC shutdown now awaits session/audio cleanup and flushes its response before
+  closing the server. The synchronous uninstall CLI therefore does not proceed
+  to Scheduled Task removal until daemon cleanup has completed.
+- Windows pipe names are SID-qualified (`voxtral-daemon-<SID>`), isolating the
+  control endpoint per Windows user. `voxtral say` now applies the same
+  URL-removing TTS sanitization used by generated/delegated speech.
+- Existing cancellable search and delegation behavior remains covered and
+  unchanged.
+
+### Regression evidence
+
+The new tests were observed failing before implementation for premature
+`LISTENING`, missing drain support, URL leakage, stateful-VAD latching, stale
+STT acceptance, missing turn identity, global pipe naming, early resource
+startup, and early shutdown acknowledgement.
+
+Focused integration verification:
+
+```text
+npm test -- test/audio-backend.test.mjs test/playback-queue.test.mjs test/session.test.mjs test/providers-mistral.test.mjs test/delegation.test.mjs test/mistral-chat.test.mjs test/control-ipc.test.mjs test/daemon-contract.test.mjs test/echo-suppressor.test.mjs
+54 passed, 0 failed
+```
+
+Full verification:
+
+```text
+npm test
+85 passed, 0 failed
+```
+
+Syntax and scope checks:
+
+```text
+node --check (all five changed production .mjs files)
+Node syntax OK
+
+PowerShell parser: install-windows-service.ps1 and uninstall-windows-service.ps1
+PowerShell syntax OK
+
+git diff --check
+No whitespace errors (Git reported only the repository's LF-to-CRLF warnings)
+```
+
+### Remaining live validation
+
+- Deterministic tests inject the playback drain boundary; the production
+  PortAudio adapter uses frame-duration completion after each device write.
+  Actual driver buffering and speaker-mode correlation thresholds still need
+  target-device tuning with live audio.
+- No live Mistral, search endpoint, microphone/speaker, or Scheduled Task
+  installation was exercised. Search/delegation cancellation is preserved by
+  the full deterministic suite.

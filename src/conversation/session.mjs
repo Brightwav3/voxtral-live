@@ -68,10 +68,15 @@ export function createConversationSession({
 
   function handleAudioFrame(frame) {
     if (closing) return;
+    if ((state === SESSION_STATES.SPEAKING || state === SESSION_STATES.THINKING)
+        && audioProfile === 'speaker'
+        && isPlaybackEcho(frame)) {
+      vad.reset();
+      return;
+    }
     const activity = vad.push(frame);
     if (activity.speechStarted) {
       if (state === SESSION_STATES.SPEAKING || state === SESSION_STATES.THINKING) {
-        if (audioProfile === 'speaker' && isPlaybackEcho(frame)) return;
         bargeIn();
       } else if (state === SESSION_STATES.LISTENING) {
         beginUserTurn();
@@ -80,9 +85,11 @@ export function createConversationSession({
     transcriber.pushAudio(frame);
   }
 
-  function handleFinalTranscript({ text }) {
+  function handleFinalTranscript({ text, turnId, generationId }) {
     if (closing || typeof text !== 'string' || !text.trim()) return;
-    if (!activeTurn || state !== SESSION_STATES.LISTENING) beginUserTurn();
+    if (!activeTurn
+        || turnId !== activeTurn.turnId
+        || generationId !== activeTurn.generationId) return;
     publish({ event: 'user_transcript', text: text.trim(), final: true }, activeTurn);
     turnController.pushFinal(text);
   }
@@ -91,6 +98,7 @@ export function createConversationSession({
     const turn = preallocated ?? allocateTurn();
     activeTurn = turn;
     cancellation.begin(turn);
+    transcriber.beginTurn(turn);
     delegation?.beginTurn(turn.turnId);
     transition(SESSION_STATES.LISTENING);
     publish({ event: 'user_started' }, turn);
@@ -187,6 +195,7 @@ export function createConversationSession({
         }
       }
       await speechQueue;
+      if (audioStarted) await audioBackend.flushOutput();
       if (!cancellation.isCurrent(scope)) return;
       if (assistantText.trim()) history.push({ role: 'assistant', content: assistantText.trim() });
       publish({ event: 'assistant_final', text: assistantText.trim(), citations }, scope);
@@ -208,6 +217,8 @@ export function createConversationSession({
 
   async function say(text) {
     if (typeof text !== 'string' || !text.trim()) throw new TypeError('say text is required');
+    const speechText = toSpeechText(text);
+    if (!speechText) throw new TypeError('say text must include speakable content');
     interrupt('say');
     const scope = beginSyntheticTurn();
     publish({ event: 'assistant_started' }, scope);
@@ -215,7 +226,8 @@ export function createConversationSession({
     publish({ event: 'assistant_audio_started' }, scope);
     const task = (async () => {
       try {
-        await speak({ text: text.trim(), signal: scope.signal, ...scope });
+        await speak({ text: speechText, signal: scope.signal, ...scope });
+        await audioBackend.flushOutput();
         if (!cancellation.isCurrent(scope)) return;
         publish({ event: 'assistant_final', text: text.trim(), citations: [] }, scope);
         transition(SESSION_STATES.LISTENING);
@@ -306,8 +318,8 @@ function createSequenceIdFactory() {
 
 function validateDependencies(dependencies) {
   const methods = {
-    audioBackend: ['startInput', 'stopOutput', 'close'],
-    transcriber: ['connect', 'pushAudio', 'on', 'close'],
+    audioBackend: ['startInput', 'stopOutput', 'flushOutput', 'close'],
+    transcriber: ['connect', 'beginTurn', 'pushAudio', 'on', 'close'],
     turnController: ['pushPartial', 'pushFinal', 'on', 'reset'],
     vad: ['push', 'reset'],
   };

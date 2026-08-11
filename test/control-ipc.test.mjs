@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createControlServer, requestControl } from '../src/control-ipc.mjs';
+import { createControlServer, createPerUserPipePath, requestControl } from '../src/control-ipc.mjs';
 import { parseControlCommand } from '../src/control-cli.mjs';
 
 test('serves status, say, interrupt, and shutdown over one local pipe', async (t) => {
@@ -84,6 +84,14 @@ test('parses voxtral control commands without an interactive prompt', () => {
   assert.deepEqual(parseControlCommand(['stop']), { command: 'shutdown', params: {} });
   assert.throws(() => parseControlCommand(['say']), /text/i);
   assert.throws(() => parseControlCommand(['unknown']), /status.*say.*interrupt.*stop/i);
+});
+
+test('qualifies the default control pipe with the current Windows user SID', () => {
+  assert.equal(
+    createPerUserPipePath('S-1-5-21-1000-2000-3000-4000'),
+    '\\\\.\\pipe\\voxtral-daemon-S-1-5-21-1000-2000-3000-4000',
+  );
+  assert.throws(() => createPerUserPipePath('DOMAIN\\user'), /SID/i);
 });
 
 function uniquePipePath(label) {

@@ -93,6 +93,7 @@ test('maps text deltas and complete transcripts without exposing provider payloa
     transcriber.on(eventName, (event) => events.push(event));
   }
   const socket = await connect(transcriber);
+  transcriber.beginTurn({ turnId: 't_9', generationId: 'g_9' });
 
   socket.message({
     type: 'session.created',
@@ -104,7 +105,7 @@ test('maps text deltas and complete transcripts without exposing provider payloa
   assert.deepEqual(events, [
     { event: 'session_ready', requestId: 'req_non_secret' },
     { event: 'partial', text: 'Hello ' },
-    { event: 'final', text: 'Hello world' },
+    { event: 'final', text: 'Hello world', turnId: 't_9', generationId: 'g_9' },
   ]);
 });
 

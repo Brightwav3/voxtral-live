@@ -124,6 +124,7 @@ test('wires injected audio, transcription, chat, speech, and control interfaces'
   const releaseManualSpeech = deferred();
   const transcriber = createEmitter({
     async connect() {},
+    beginTurn(turn) { transcriber.turn = turn; },
     pushAudio() { return true; },
     async close() {},
   });
@@ -140,7 +141,7 @@ test('wires injected audio, transcription, chat, speech, and control interfaces'
     dependencies: {
       audioBackend: {
         async startInput(handler) { input = handler; },
-        writeOutput() {}, stopOutput() {}, async close() {},
+        writeOutput() {}, stopOutput() {}, async flushOutput() {}, async close() {},
       },
       vad: { push: (frame) => ({ speechStarted: frame.speechStarted }), reset() {} },
       transcriber,
@@ -163,7 +164,7 @@ test('wires injected audio, transcription, chat, speech, and control interfaces'
   await runtime.ready;
 
   input({ speechStarted: true });
-  transcriber.emit('final', { text: 'Hello daemon' });
+  transcriber.emit('final', { text: 'Hello daemon', ...transcriber.turn });
   await waitFor(() => lines.some((event) => event.event === 'assistant_final'));
 
   assert.deepEqual(spoken, ['Connected.']);
@@ -173,6 +174,99 @@ test('wires injected audio, transcription, chat, speech, and control interfaces'
   releaseManualSpeech.resolve();
   await runtime.shutdown();
   assert.equal(lines.at(-1).event, 'daemon_stopped');
+});
+
+test('acquires singleton ownership before STT/mic and emits daemon_started last', async () => {
+  const order = [];
+  const transcriber = createEmitter({
+    async connect() { order.push('stt'); }, beginTurn() {}, pushAudio() { return true; }, async close() {},
+  });
+  const runtime = startDaemon({
+    env: { MISTRAL_API_KEY: 'test-key' },
+    write(line) {
+      if (JSON.parse(line).event === 'daemon_started') order.push('daemon_started');
+    },
+    dependencies: {
+      audioBackend: {
+        async startInput() { order.push('mic'); }, writeOutput() {}, stopOutput() {},
+        async flushOutput() {}, async close() {},
+      },
+      vad: { push: () => ({ speechStarted: false }), reset() {} },
+      transcriber,
+      turnController: createEmitter({ pushPartial() {}, pushFinal() {}, reset() {} }),
+      async *streamChat() {}, async speak() {},
+      searchProvider: { async search() { return []; } },
+      controlServerFactory() {
+        return { pipePath: 'test-pipe', async start() { order.push('singleton'); }, async close() {} };
+      },
+    },
+  });
+
+  await runtime.ready;
+  assert.deepEqual(order, ['singleton', 'stt', 'mic', 'daemon_started']);
+  await runtime.shutdown();
+});
+
+test('singleton bind failure starts neither STT nor microphone and emits no started event', async () => {
+  const calls = [];
+  const lines = [];
+  const bindError = Object.assign(new Error('occupied'), { code: 'EADDRINUSE' });
+  const runtime = startDaemon({
+    env: { MISTRAL_API_KEY: 'test-key' },
+    write: (line) => lines.push(JSON.parse(line)),
+    dependencies: {
+      audioBackend: {
+        async startInput() { calls.push('mic'); }, writeOutput() {}, stopOutput() {},
+        async flushOutput() {}, async close() {},
+      },
+      vad: { push: () => ({ speechStarted: false }), reset() {} },
+      transcriber: createEmitter({
+        async connect() { calls.push('stt'); }, beginTurn() {}, pushAudio() { return true; }, async close() {},
+      }),
+      turnController: createEmitter({ pushPartial() {}, pushFinal() {}, reset() {} }),
+      async *streamChat() {}, async speak() {},
+      searchProvider: { async search() { return []; } },
+      controlServerFactory() {
+        return { pipePath: 'test-pipe', async start() { throw bindError; }, async close() {} };
+      },
+    },
+  });
+
+  await assert.rejects(() => runtime.ready, (error) => error.code === 'EADDRINUSE');
+  assert.deepEqual(calls, []);
+  assert.equal(lines.some((event) => event.event === 'daemon_started'), false);
+});
+
+test('shutdown control handshake resolves only after audio and STT cleanup', async () => {
+  const cleanup = deferred();
+  let handlers;
+  const runtime = startDaemon({
+    env: { MISTRAL_API_KEY: 'test-key' },
+    write() {},
+    dependencies: {
+      audioBackend: {
+        async startInput() {}, writeOutput() {}, stopOutput() {}, async flushOutput() {},
+        async close() { await cleanup.promise; },
+      },
+      vad: { push: () => ({ speechStarted: false }), reset() {} },
+      transcriber: createEmitter({ async connect() {}, beginTurn() {}, pushAudio() { return true; }, async close() {} }),
+      turnController: createEmitter({ pushPartial() {}, pushFinal() {}, reset() {} }),
+      async *streamChat() {}, async speak() {},
+      searchProvider: { async search() { return []; } },
+      controlServerFactory(options) {
+        handlers = options.handlers;
+        return { pipePath: 'test-pipe', async start() {}, async close() {} };
+      },
+    },
+  });
+  await runtime.ready;
+  let acknowledged = false;
+
+  const stopping = handlers.shutdown().then((result) => { acknowledged = true; return result; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(acknowledged, false);
+  cleanup.resolve();
+  assert.deepEqual(await stopping, { stopped: true });
 });
 
 function createEmitter(methods) {

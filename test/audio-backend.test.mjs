@@ -85,6 +85,27 @@ test('interrupting speech stops the active output stream and discards stale audi
   assert.deepEqual(streams[1].writes.map((frame) => frame.readFloatLE()), [4]);
 });
 
+test('flushOutput waits until the final frame is device-drained', async () => {
+  const { PortAudio, streams } = createFakePortAudio();
+  const drained = deferred();
+  const backend = createAudioBackend({
+    PortAudio,
+    waitForOutputDrain: async () => drained.promise,
+  });
+  backend.writeOutput(new Float32Array(480).fill(0.25));
+  await waitFor(() => streams.length === 1 && streams[0].writes.length === 1);
+  let flushFinished = false;
+
+  const flushing = backend.flushOutput().then(() => { flushFinished = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(flushFinished, false);
+
+  drained.resolve();
+  await flushing;
+  assert.equal(flushFinished, true);
+  await backend.close();
+});
+
 function createFakePortAudio() {
   const streams = [];
   class AudioIO {
@@ -119,4 +140,10 @@ async function waitFor(predicate) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   assert.fail('timed out waiting for audio operation');
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
 }

@@ -1,6 +1,8 @@
 import net from 'node:net';
+import { execFileSync } from 'node:child_process';
+import { userInfo } from 'node:os';
 
-export const DEFAULT_PIPE_PATH = '\\\\.\\pipe\\voxtral-daemon';
+export const DEFAULT_PIPE_PATH = resolveDefaultPipePath();
 const COMMANDS = new Set(['status', 'say', 'interrupt', 'shutdown']);
 const MAX_FRAME_BYTES = 65_536;
 let requestSequence = 0;
@@ -102,11 +104,44 @@ export function createControlServer({
     if (command === 'shutdown') shuttingDown = true;
     try {
       const result = await handlers[command](params);
-      respond(socket, { id, ok: true, result: result ?? {} });
+      await respond(socket, { id, ok: true, result: result ?? {} });
     } catch (error) {
-      respond(socket, failure(id, safeErrorCode(error?.code), 'Control command failed'));
+      await respond(socket, failure(id, safeErrorCode(error?.code), 'Control command failed'));
+    } finally {
+      if (command === 'shutdown') await close();
     }
   }
+}
+
+export function createPerUserPipePath(userSid) {
+  if (typeof userSid !== 'string' || !/^S-\d+(?:-\d+)+$/i.test(userSid.trim())) {
+    throw new TypeError('A valid Windows user SID is required');
+  }
+  return `\\\\.\\pipe\\voxtral-daemon-${userSid.trim()}`;
+}
+
+export function resolveDefaultPipePath({
+  platform = process.platform,
+  execFileSyncImpl = execFileSync,
+  userInfoImpl = userInfo,
+} = {}) {
+  if (platform === 'win32') {
+    let output;
+    try {
+      output = String(execFileSyncImpl('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      }));
+    } catch {
+      throw controlError('user_sid_unavailable', 'Unable to resolve the current Windows user SID');
+    }
+    const sid = output.match(/S-\d+(?:-\d+)+/i)?.[0];
+    if (!sid) throw controlError('user_sid_unavailable', 'Unable to resolve the current Windows user SID');
+    return createPerUserPipePath(sid);
+  }
+  const identity = userInfoImpl();
+  const uid = Number.isInteger(identity?.uid) ? identity.uid : identity?.username;
+  return `\\\\.\\pipe\\voxtral-daemon-uid-${String(uid).replace(/[^a-z0-9_-]/gi, '_')}`;
 }
 
 export function requestControl({
@@ -184,7 +219,8 @@ function validateRequest(request) {
 }
 
 function respond(socket, response) {
-  if (!socket.destroyed) socket.end(`${JSON.stringify(response)}\n`);
+  if (socket.destroyed) return Promise.resolve();
+  return new Promise((resolve) => socket.end(`${JSON.stringify(response)}\n`, resolve));
 }
 
 function failure(id, code, message) {

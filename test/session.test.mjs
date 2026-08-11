@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 
 import { createConversationSession } from '../src/conversation/session.mjs';
 import { createDelegationManager } from '../src/conversation/delegation.mjs';
+import { createVad } from '../src/audio/vad.mjs';
+import { createEchoSuppressor } from '../src/audio/echo-suppressor.mjs';
 
 test('assigns a unique turnId and generationId to every user turn', async () => {
   const subject = createSubject();
   await subject.session.start();
 
   subject.input({ speechStarted: true, name: 'first' });
-  subject.transcriber.emit('final', { text: 'First turn' });
+  subject.final('First turn');
   await waitFor(() => subject.session.status().state === 'LISTENING');
   subject.input({ speechStarted: true, name: 'second' });
 
@@ -38,7 +40,7 @@ test('barge-in stops output, aborts generation, accepts new audio, and ignores s
   await subject.session.start();
 
   subject.input({ speechStarted: true, name: 'first-frame' });
-  subject.transcriber.emit('final', { text: 'First turn' });
+  subject.final('First turn');
   await waitFor(() => subject.session.status().state === 'SPEAKING');
   const firstGeneration = subject.session.status();
 
@@ -64,7 +66,7 @@ test('barge-in stops output, aborts generation, accepts new audio, and ignores s
   assert.equal(subject.session.status().state, 'LISTENING');
   assert.equal(subject.events.some((event) => event.event === 'assistant_final' && event.turnId === 't_1'), false);
 
-  subject.transcriber.emit('final', { text: 'Second turn' });
+  subject.final('Second turn');
   await waitFor(() => subject.events.some((event) => event.event === 'assistant_final' && event.turnId === 't_2'));
   assert.equal(speechCalls.at(-1).text, 'New answer.');
   await subject.session.shutdown();
@@ -88,7 +90,7 @@ test('speaker mode requires echo cancellation and suppresses detected playback e
   });
   await subject.session.start();
   subject.input({ speechStarted: true });
-  subject.transcriber.emit('final', { text: 'Start speaking' });
+  subject.final('Start speaking');
   await waitFor(() => subject.session.status().state === 'SPEAKING');
 
   subject.input({ speechStarted: true, echo: true });
@@ -131,7 +133,7 @@ test('adds delegated search citations to final text while TTS receives no raw UR
   });
   await subject.session.start();
   subject.input({ speechStarted: true });
-  subject.transcriber.emit('final', { text: 'Find updates' });
+  subject.final('Find updates');
   await waitFor(() => subject.events.some((event) => event.event === 'assistant_final'));
 
   assert.deepEqual(spoken, ["I'll look that up.", 'Voxtral docs. Official release details.']);
@@ -151,17 +153,111 @@ test('adds delegated search citations to final text while TTS receives no raw UR
   await subject.session.shutdown();
 });
 
+test('stays SPEAKING through queued playback tail and routes tail speech through barge-in', async () => {
+  const drain = deferred();
+  const subject = createSubject({
+    async *streamChat() {
+      yield { event: 'delta', text: 'Tail audio.' };
+      yield { event: 'sentence_ready', text: 'Tail audio.' };
+    },
+    async flushOutput() { await drain.promise; },
+  });
+  await subject.session.start();
+  subject.input({ speechStarted: true });
+  subject.final('Start tail test');
+  await waitFor(() => subject.events.some((event) => event.event === 'assistant_audio_started'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(subject.audio.flushOutputCalls, 1);
+  assert.equal(subject.session.status().state, 'SPEAKING');
+  subject.input({ speechStarted: true });
+  assert.equal(subject.audio.stopOutputCalls, 1);
+  assert.equal(subject.events.some((event) => event.event === 'barge_in'), true);
+
+  drain.resolve();
+  await subject.session.shutdown();
+});
+
+test('sanitizes raw URLs before voxtral say reaches TTS', async () => {
+  const spoken = [];
+  const subject = createSubject({ async speak({ text }) { spoken.push(text); } });
+  await subject.session.start();
+
+  await subject.session.say('Read https://example.test/private now.');
+  await waitFor(() => subject.events.some((event) => event.event === 'assistant_final'));
+
+  assert.deepEqual(spoken, ['Read now.']);
+  await subject.session.shutdown();
+});
+
+test('sustained speaker echo does not latch VAD or hide a later human barge-in', async () => {
+  const holdSpeech = deferred();
+  const suppressor = createEchoSuppressor({ correlationThreshold: 0.8 });
+  suppressor.pushOutput(signalFrame(24_000, 480, 440));
+  const subject = createSubject({
+    audioProfile: 'speaker',
+    echoCancellation: true,
+    vad: createVad({ startRms: 0.05, stopRms: 0.03 }),
+    isPlaybackEcho: suppressor.isPlaybackEcho,
+    async *streamChat() { yield { event: 'sentence_ready', text: 'Playing.' }; },
+    async speak() { await holdSpeech.promise; },
+  });
+  await subject.session.start();
+  for (let index = 0; index < 3; index += 1) subject.input(toPcm16(signalFrame(16_000, 320, 910)));
+  subject.final('Start playback');
+  await waitFor(() => subject.session.status().state === 'SPEAKING');
+
+  for (let index = 0; index < 6; index += 1) subject.input(toPcm16(signalFrame(16_000, 320, 440)));
+  assert.equal(subject.audio.stopOutputCalls, 0);
+  for (let index = 0; index < 3; index += 1) subject.input(toPcm16(signalFrame(16_000, 320, 910)));
+
+  assert.equal(subject.audio.stopOutputCalls, 1);
+  assert.equal(subject.events.some((event) => event.event === 'barge_in'), true);
+  holdSpeech.resolve();
+  await subject.session.shutdown();
+});
+
+test('discards a delayed final STT callback from the pre-barge generation', async () => {
+  const holdSpeech = deferred();
+  const subject = createSubject({
+    async *streamChat() { yield { event: 'sentence_ready', text: 'Speaking.' }; },
+    async speak() { await holdSpeech.promise; },
+  });
+  await subject.session.start();
+  subject.input({ speechStarted: true });
+  const first = subject.session.status();
+  subject.final('First', first);
+  await waitFor(() => subject.session.status().state === 'SPEAKING');
+  subject.input({ speechStarted: true });
+  const second = subject.session.status();
+
+  subject.final('Stale result', first);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(subject.events.some((event) => event.event === 'user_transcript' && event.text === 'Stale result'), false);
+  assert.equal(subject.session.status().turnId, second.turnId);
+
+  holdSpeech.resolve();
+  await subject.session.shutdown();
+});
+
 function createSubject(overrides = {}) {
   const events = [];
   const audio = {
     stopOutputCalls: 0,
+    flushOutputCalls: 0,
     async startInput(handler) { audio.input = handler; },
     writeOutput() {},
     stopOutput() { audio.stopOutputCalls += 1; },
+    async flushOutput() {
+      audio.flushOutputCalls += 1;
+      await overrides.flushOutput?.();
+    },
     async close() {},
   };
+  let transcriberContext;
   const transcriber = createEmitter({
     frames: [],
+    beginTurn(turn) { transcriberContext = { turnId: turn.turnId, generationId: turn.generationId }; },
     async connect() {},
     pushAudio(frame) { transcriber.frames.push(frame); return true; },
     async close() {},
@@ -171,7 +267,7 @@ function createSubject(overrides = {}) {
     pushFinal(text) { turnController.emit('turn', { text }); },
     reset() {},
   });
-  const vad = {
+  const vad = overrides.vad ?? {
     push(frame) {
       return { state: frame.speechStarted ? 'speech' : 'silence', speechStarted: frame.speechStarted, speechStopped: false };
     },
@@ -194,7 +290,26 @@ function createSubject(overrides = {}) {
     isPlaybackEcho: overrides.isPlaybackEcho,
     delegation,
   });
-  return { session, audio, transcriber, turnController, vad, events, input: (frame) => audio.input(frame) };
+  return {
+    session,
+    audio,
+    transcriber,
+    turnController,
+    vad,
+    events,
+    input: (frame) => audio.input(frame),
+    final(text, context = transcriberContext) { transcriber.emit('final', { text, ...context }); },
+  };
+}
+
+function signalFrame(sampleRate, length, frequency) {
+  return Float32Array.from({ length }, (_, index) => Math.sin(2 * Math.PI * frequency * index / sampleRate) * 0.25);
+}
+
+function toPcm16(frame) {
+  const buffer = Buffer.alloc(frame.length * 2);
+  frame.forEach((sample, index) => buffer.writeInt16LE(Math.round(sample * 32767), index * 2));
+  return buffer;
 }
 
 function createEmitter(methods) {

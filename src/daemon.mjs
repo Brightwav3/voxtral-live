@@ -26,12 +26,18 @@ export function startDaemon({
   const config = loadConfig(env, argv);
   const sessionId = `s_${Date.now().toString(36)}_${process.pid.toString(36)}`;
   const publish = (event) => emitEvent({ sessionId, ...event }, write);
+  const bufferedEvents = [];
+  let startupComplete = false;
+  const publishSessionEvent = (event) => {
+    if (startupComplete) publish(event);
+    else bufferedEvents.push(event);
+  };
   let stopping;
+  let cleanupPromise;
   let signalHandlersInstalled = false;
 
-  publish({ event: 'daemon_started', mode: config.mode });
-
   if (argv.includes('--once')) {
+    publish({ event: 'daemon_started', mode: config.mode });
     publish({ event: 'listening' });
     return {
       config,
@@ -78,7 +84,7 @@ export function startDaemon({
   const delegation = dependencies.delegation ?? createDelegationManager({
     conversationId: sessionId,
     webSearch: (request) => searchProvider.search(request),
-    emit: publish,
+    emit: publishSessionEvent,
   });
   const session = createConversationSession({
     conversationId: sessionId,
@@ -88,7 +94,7 @@ export function startDaemon({
     vad,
     streamChat: chat,
     speak,
-    emit: publish,
+    emit: publishSessionEvent,
     audioProfile: config.audioProfile,
     echoCancellation: config.echoCancellation,
     isPlaybackEcho: dependencies.isPlaybackEcho ?? echoSuppressor?.isPlaybackEcho,
@@ -102,16 +108,21 @@ export function startDaemon({
       say: ({ text }) => session.say(text),
       interrupt: () => session.interrupt('control'),
       shutdown: async () => {
-        setImmediate(() => { void shutdown(); });
-        return { stopping: true };
+        await cleanupResources();
+        return { stopped: true };
       },
     },
   });
 
   const ready = (async () => {
+    let sessionStartAttempted = false;
     try {
-      await session.start();
       await controlServer.start();
+      sessionStartAttempted = true;
+      await session.start();
+      publish({ event: 'daemon_started', mode: config.mode });
+      startupComplete = true;
+      for (const event of bufferedEvents.splice(0)) publish(event);
       installSignalHandlers();
     } catch (error) {
       publish({
@@ -120,7 +131,10 @@ export function startDaemon({
         message: 'Voxtral daemon failed to start',
         recoverable: false,
       });
-      await Promise.allSettled([session.shutdown(), controlServer.close()]);
+      await Promise.allSettled([
+        ...(sessionStartAttempted ? [session.shutdown()] : []),
+        controlServer.close(),
+      ]);
       throw error;
     }
   })();
@@ -145,15 +159,24 @@ export function startDaemon({
   async function shutdown() {
     if (stopping) return stopping;
     stopping = (async () => {
+      await cleanupResources();
+      await controlServer.close();
+    })();
+    return stopping;
+  }
+
+  async function cleanupResources() {
+    if (cleanupPromise) return cleanupPromise;
+    cleanupPromise = (async () => {
       if (signalHandlersInstalled) {
         process.removeListener('SIGINT', shutdown);
         process.removeListener('SIGTERM', shutdown);
         signalHandlersInstalled = false;
       }
-      await Promise.allSettled([session.shutdown(), controlServer.close()]);
+      await session.shutdown();
       publish({ event: 'daemon_stopped' });
     })();
-    return stopping;
+    return cleanupPromise;
   }
 }
 
@@ -172,6 +195,7 @@ function withEchoReference(audioBackend, echoSuppressor) {
       audioBackend.stopOutput();
       echoSuppressor.reset();
     },
+    flushOutput: () => audioBackend.flushOutput(),
     async close() {
       echoSuppressor.reset();
       await audioBackend.close();

@@ -21,8 +21,17 @@ export function createRealtimeTranscriber({
   let permanentlyClosed = false;
   let explicitlyClosing = false;
   let inputEnded = false;
+  const pendingTurns = [];
 
-  return { connect, pushAudio, on, close };
+  return { connect, beginTurn, pushAudio, on, close };
+
+  function beginTurn({ turnId, generationId } = {}) {
+    if (typeof turnId !== 'string' || !turnId.trim()) throw new TypeError('turnId is required');
+    if (typeof generationId !== 'string' || !generationId.trim()) throw new TypeError('generationId is required');
+    const previous = pendingTurns.at(-1);
+    if (previous?.turnId === turnId && previous?.generationId === generationId) return;
+    pendingTurns.push({ turnId, generationId });
+  }
 
   function on(eventName, handler) {
     if (typeof handler !== 'function') throw new TypeError('event handler must be a function');
@@ -138,7 +147,10 @@ export function createRealtimeTranscriber({
     } else if (isTextDelta(payload)) {
       if (typeof payload.text === 'string' && payload.text) emit('partial', { event: 'partial', text: payload.text });
     } else if (isFinalTranscript(payload)) {
-      if (typeof payload.text === 'string' && payload.text) emit('final', { event: 'final', text: payload.text });
+      const turn = pendingTurns.shift();
+      if (turn && typeof payload.text === 'string' && payload.text) {
+        emit('final', { event: 'final', text: payload.text, ...turn });
+      }
     } else if (payload.type === 'error') {
       emit('error', providerError(payload.error?.code));
     }

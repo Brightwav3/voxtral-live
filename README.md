@@ -56,7 +56,8 @@ barge-in behavior.
 
 ## Local control
 
-The daemon owns the per-user named pipe `\\.\pipe\voxtral-daemon`. Frames are
+The daemon owns a SID-qualified per-user named pipe such as
+`\\.\pipe\voxtral-daemon-S-1-5-21-...`. Frames are
 newline-delimited JSON requests/responses; no TCP port is opened. Only one
 daemon can bind the pipe.
 

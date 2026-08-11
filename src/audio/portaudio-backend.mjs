@@ -14,14 +14,20 @@ const OUTPUT_OPTIONS = {
   framesPerBuffer: 480,
 };
 
-export function createPortAudioBackend({ inputDevice, outputDevice, PortAudio } = {}) {
+export function createPortAudioBackend({
+  inputDevice,
+  outputDevice,
+  PortAudio,
+  waitForOutputDrain = defaultWaitForOutputDrain,
+} = {}) {
+  if (typeof waitForOutputDrain !== 'function') throw new TypeError('waitForOutputDrain must be a function');
   let input;
   let output;
   let queue;
   let closed = false;
   let inputStarting = false;
 
-  return { startInput, writeOutput, stopOutput, close };
+  return { startInput, writeOutput, stopOutput, flushOutput, close };
 
   async function startInput(onFrame) {
     if (typeof onFrame !== 'function') throw new Error('onFrame must be a function');
@@ -60,6 +66,10 @@ export function createPortAudioBackend({ inputDevice, outputDevice, PortAudio } 
     resetOutput();
   }
 
+  async function flushOutput() {
+    await queue?.flush();
+  }
+
   async function close() {
     closed = true;
     stopOutput();
@@ -81,6 +91,11 @@ export function createPortAudioBackend({ inputDevice, outputDevice, PortAudio } 
           output.start();
         }
         output.write(Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength));
+        await waitForOutputDrain({
+          frame,
+          sampleRate: OUTPUT_OPTIONS.sampleRate,
+          durationMs: frame.length / OUTPUT_OPTIONS.sampleRate * 1000,
+        });
       },
     });
   }
@@ -90,6 +105,10 @@ export function createPortAudioBackend({ inputDevice, outputDevice, PortAudio } 
     output = undefined;
     activeOutput?.quit();
   }
+}
+
+function defaultWaitForOutputDrain({ durationMs }) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.ceil(durationMs))));
 }
 
 function toAudioOptions(audio, options, deviceId) {
