@@ -26,6 +26,7 @@ export function createPortAudioBackend({
   let queue;
   let closed = false;
   let inputStarting = false;
+  let outputClosePromise = Promise.resolve();
 
   return { startInput, writeOutput, stopOutput, flushOutput, close };
 
@@ -68,11 +69,13 @@ export function createPortAudioBackend({
 
   async function flushOutput() {
     await queue?.flush();
+    await resetOutput();
   }
 
   async function close() {
     closed = true;
-    stopOutput();
+    queue?.stopOutput();
+    await resetOutput();
     await queue?.flush();
     input?.quit();
     input = undefined;
@@ -82,6 +85,7 @@ export function createPortAudioBackend({
   function createOutputQueue() {
     return createPlaybackQueue({
       writeFrame: async (frame, isCurrent) => {
+        await outputClosePromise;
         const audio = await loadPortAudio(PortAudio);
         if (closed || !isCurrent()) return;
         if (!output) {
@@ -103,7 +107,9 @@ export function createPortAudioBackend({
   function resetOutput() {
     const activeOutput = output;
     output = undefined;
-    activeOutput?.quit();
+    if (!activeOutput) return outputClosePromise;
+    outputClosePromise = outputClosePromise.then(() => activeOutput.quit());
+    return outputClosePromise;
   }
 }
 

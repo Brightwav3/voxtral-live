@@ -106,6 +106,18 @@ test('flushOutput waits until the final frame is device-drained', async () => {
   await backend.close();
 });
 
+test('flushOutput closes the output stream after the final frame drains', async () => {
+  const { PortAudio, streams } = createFakePortAudio();
+  const backend = createAudioBackend({ PortAudio });
+
+  backend.writeOutput(new Float32Array(480).fill(0.25));
+  await waitFor(() => streams.length === 1 && streams[0].writes.length === 1);
+  await backend.flushOutput();
+
+  assert.equal(streams[0].quitCalls, 1);
+  await backend.close();
+});
+
 function createFakePortAudio() {
   const streams = [];
   class AudioIO {
