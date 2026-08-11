@@ -24,19 +24,17 @@ export function createSentenceChunker({ maxChars = 220 } = {}) {
     const chunks = [];
     while (buffer.trim()) {
       const sentenceEnd = findSentenceEnd(buffer);
-      if (sentenceEnd > 0) {
+      if (sentenceEnd > 0 && sentenceEnd <= maxChars) {
         chunks.push(buffer.slice(0, sentenceEnd).trim());
         buffer = buffer.slice(sentenceEnd).replace(/^\s+/, '');
         continue;
       }
 
-      if (buffer.length > maxChars) {
+      if (sentenceEnd > maxChars || buffer.length > maxChars) {
         const cut = findWordBoundary(buffer, maxChars);
-        if (cut > 0) {
-          chunks.push(buffer.slice(0, cut).trim());
-          buffer = buffer.slice(cut).replace(/^\s+/, '');
-          continue;
-        }
+        chunks.push(buffer.slice(0, cut).trim());
+        buffer = buffer.slice(cut).replace(/^\s+/, '');
+        continue;
       }
       break;
     }
@@ -65,5 +63,5 @@ function isAbbreviation(text, periodIndex) {
 
 function findWordBoundary(text, maxChars) {
   const beforeLimit = text.lastIndexOf(' ', maxChars);
-  return beforeLimit > 0 ? beforeLimit : text.indexOf(' ', maxChars);
+  return beforeLimit > 0 ? beforeLimit : maxChars;
 }

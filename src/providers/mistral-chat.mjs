@@ -11,12 +11,14 @@ export async function* streamChat({
   messages,
   tools,
   signal,
+  maxHistoryTokens = DEFAULT_HISTORY_TOKEN_BUDGET,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (typeof apiKey !== 'string' || !apiKey.trim()) throw chatError('missing_api_key', 'Mistral chat request failed');
   if (typeof model !== 'string' || !model.trim()) throw chatError('invalid_model', 'Mistral chat request failed');
   if (!Array.isArray(messages)) throw chatError('invalid_messages', 'Mistral chat request failed');
   if (typeof fetchImpl !== 'function') throw chatError('fetch_unavailable', 'Mistral chat request failed');
+  if (!Number.isInteger(maxHistoryTokens) || maxHistoryTokens < 1) throw chatError('invalid_history_budget', 'Mistral chat request failed');
 
   let response;
   try {
@@ -26,7 +28,7 @@ export async function* streamChat({
       body: JSON.stringify({
         model,
         stream: true,
-        messages: buildMessages(messages),
+        messages: buildMessages(messages, maxHistoryTokens),
         ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
       }),
       signal,
@@ -49,22 +51,47 @@ export async function* streamChat({
   for (const sentence of chunker.flush()) yield { event: 'sentence_ready', text: sentence };
 }
 
-function buildMessages(messages) {
+function buildMessages(messages, maxHistoryTokens) {
   const valid = messages.filter((message) => message && typeof message.role === 'string' && typeof message.content === 'string');
   const history = valid.filter((message) => message.role !== 'system');
   const oldHistory = history.slice(0, -24);
   const recentHistory = history.slice(-24);
-  const summary = estimateTokens(history) > DEFAULT_HISTORY_TOKEN_BUDGET ? summarize(oldHistory) : '';
+  if (estimateTokens(history) <= maxHistoryTokens) return [{ role: 'system', content: CHAT_SYSTEM_PROMPT }, ...recentHistory];
+
+  const { kept, dropped, usedTokens } = retainRecentMessages(recentHistory, maxHistoryTokens);
+  const summaryBudget = maxHistoryTokens - usedTokens;
+  const summary = summaryBudget > 4 ? summarize([...oldHistory, ...dropped], summaryBudget - 4) : '';
   return [
     { role: 'system', content: CHAT_SYSTEM_PROMPT },
     ...(summary ? [{ role: 'system', content: `Conversation summary: ${summary}` }] : []),
-    ...recentHistory,
+    ...kept,
   ];
 }
 
-function summarize(messages) {
+function retainRecentMessages(messages, maxTokens) {
+  const kept = [];
+  const dropped = [];
+  let usedTokens = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const tokens = estimateTokens([message]);
+    if (tokens <= maxTokens - usedTokens) {
+      kept.unshift(message);
+      usedTokens += tokens;
+    } else if (kept.length === 0) {
+      const content = message.content.slice(0, maxTokens * 4);
+      kept.unshift({ ...message, content });
+      usedTokens = estimateTokens(kept);
+    } else {
+      dropped.unshift(message);
+    }
+  }
+  return { kept, dropped, usedTokens };
+}
+
+function summarize(messages, maxTokens) {
   const text = messages.map((message) => `${message.role}: ${message.content}`).join(' ').trim();
-  return text ? text.slice(0, 1200) : '';
+  return text ? text.slice(0, maxTokens * 4) : '';
 }
 
 function estimateTokens(messages) {
@@ -72,33 +99,49 @@ function estimateTokens(messages) {
 }
 
 async function* readServerSentEvents(body) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
+  let reader;
   let buffer = '';
   try {
+    reader = body.getReader();
+    const decoder = new TextDecoder();
     while (true) {
       const { done, value } = await reader.read();
       buffer += decoder.decode(value, { stream: !done });
       const events = buffer.split(/\r?\n\r?\n/);
       buffer = events.pop();
       for (const event of events) {
-        const data = event.split(/\r?\n/).filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice(5).trim()).join('\n');
-        if (!data) continue;
-        if (data === '[DONE]') {
-          yield data;
+        const payload = parseServerSentEvent(event);
+        if (!payload) continue;
+        if (payload === '[DONE]') {
+          yield payload;
           return;
         }
-        try {
-          yield JSON.parse(data);
-        } catch {
-          throw chatError('invalid_stream', 'Mistral chat stream failed');
-        }
+        yield payload;
       }
-      if (done) break;
+      if (done) {
+        const payload = parseServerSentEvent(buffer);
+        if (payload) {
+          yield payload;
+        }
+        return;
+      }
     }
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.recoverable) throw error;
+    throw chatError('chat_stream_failed', 'Mistral chat stream failed');
   } finally {
-    reader.releaseLock();
+    reader?.releaseLock();
+  }
+}
+
+function parseServerSentEvent(event) {
+  const data = event.split(/\r?\n/).filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim()).join('\n');
+  if (!data || data === '[DONE]') return data;
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw chatError('invalid_stream', 'Mistral chat stream failed');
   }
 }
 

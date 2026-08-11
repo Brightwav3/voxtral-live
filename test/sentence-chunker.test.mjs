@@ -33,3 +33,12 @@ test('flushes the final unpunctuated text once', () => {
   assert.deepEqual(chunker.flush(), ['The answer trails off']);
   assert.deepEqual(chunker.flush(), []);
 });
+
+test('enforces maxChars when a completed sentence is longer than the limit', () => {
+  const chunker = createSentenceChunker({ maxChars: 10 });
+
+  const chunks = chunker.push('This is a very long sentence.');
+
+  assert.deepEqual(chunks, ['This is a', 'very long', 'sentence.']);
+  assert.equal(chunks.every((chunk) => chunk.length <= 10), true);
+});

@@ -4,6 +4,7 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
 
   const handlers = new Map();
   let pendingFinal = '';
+  let lastEmitted = '';
   let timer;
 
   return { pushPartial, pushFinal, on, reset };
@@ -15,6 +16,10 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
   function pushFinal(text) {
     pendingFinal = normalize(text);
     clearTimeout(timer);
+    if (pendingFinal === lastEmitted) {
+      pendingFinal = '';
+      return;
+    }
     if (!pendingFinal || countWords(pendingFinal) < minWords) return;
     timer = setTimeout(emitPendingTurn, silenceMs);
   }
@@ -31,6 +36,7 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
     clearTimeout(timer);
     timer = undefined;
     pendingFinal = '';
+    lastEmitted = '';
   }
 
   function emitPendingTurn() {
@@ -38,6 +44,7 @@ export function createTurnController({ silenceMs = 550, minWords = 1 } = {}) {
     const text = pendingFinal;
     pendingFinal = '';
     if (!text) return;
+    lastEmitted = text;
     for (const handler of handlers.get('turn') ?? []) handler({ text });
   }
 }
