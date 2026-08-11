@@ -114,7 +114,7 @@ function defaultWaitForOutputDrain({ durationMs }) {
 function toAudioOptions(audio, options, deviceId) {
   const sampleFormat = options.sampleFormat === 'int16'
     ? audio.SampleFormat16Bit
-    : audio.SampleFormat32Bit;
+    : audio.SampleFormatFloat32;
   return {
     ...options,
     sampleFormat,

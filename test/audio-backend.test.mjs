@@ -131,7 +131,15 @@ function createFakePortAudio() {
     write(frame) { this.writes.push(frame); }
   }
 
-  return { PortAudio: { AudioIO, SampleFormat16Bit: 's16', SampleFormat32Bit: 'f32' }, streams };
+  return {
+    PortAudio: {
+      AudioIO,
+      SampleFormat16Bit: 's16',
+      SampleFormatFloat32: 'f32',
+      SampleFormat32Bit: 's32',
+    },
+    streams,
+  };
 }
 
 async function waitFor(predicate) {
