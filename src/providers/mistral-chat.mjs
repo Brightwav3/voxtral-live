@@ -1,4 +1,5 @@
 import { createSentenceChunker } from '../conversation/sentence-chunker.mjs';
+import { validateWebSearchInput } from './web-search.mjs';
 
 export const DEFAULT_CHAT_MODEL = 'mistral-small-latest';
 export const DEFAULT_CHAT_BASE_URL = 'https://api.mistral.ai';
@@ -41,14 +42,17 @@ export async function* streamChat({
   if (!response?.ok || !response.body) throw chatError('chat_request_failed', 'Mistral chat request failed');
 
   const chunker = createSentenceChunker();
+  const toolCalls = new Map();
   for await (const payload of readServerSentEvents(response.body)) {
     if (payload === '[DONE]') break;
+    collectToolCallDeltas(payload, toolCalls);
     const text = assistantDelta(payload);
     if (!text) continue;
     yield { event: 'delta', text };
     for (const sentence of chunker.push(text)) yield { event: 'sentence_ready', text: sentence };
   }
   for (const sentence of chunker.flush()) yield { event: 'sentence_ready', text: sentence };
+  for (const toolCall of finalizeToolCalls(toolCalls)) yield toolCall;
 }
 
 function buildMessages(messages, maxHistoryTokens) {
@@ -148,6 +152,35 @@ function parseServerSentEvent(event) {
 function assistantDelta(payload) {
   const content = payload?.choices?.[0]?.delta?.content;
   return typeof content === 'string' ? content : '';
+}
+
+function collectToolCallDeltas(payload, toolCalls) {
+  const deltas = payload?.choices?.[0]?.delta?.tool_calls;
+  if (!Array.isArray(deltas)) return;
+  for (const delta of deltas) {
+    if (!Number.isInteger(delta?.index) || delta.index < 0) throw chatError('invalid_tool_call', 'Mistral chat tool call failed');
+    const existing = toolCalls.get(delta.index) ?? { id: '', name: '', arguments: '' };
+    if (typeof delta.id === 'string') existing.id += delta.id;
+    if (typeof delta.function?.name === 'string') existing.name += delta.function.name;
+    if (typeof delta.function?.arguments === 'string') existing.arguments += delta.function.arguments;
+    toolCalls.set(delta.index, existing);
+  }
+}
+
+function finalizeToolCalls(toolCalls) {
+  return [...toolCalls.entries()].sort(([left], [right]) => left - right).map(([, call]) => {
+    if (!/^[a-z0-9_-]{1,128}$/i.test(call.id) || !/^[a-z0-9_-]{1,64}$/i.test(call.name)) {
+      throw chatError('invalid_tool_call', 'Mistral chat tool call failed');
+    }
+    let args;
+    try {
+      args = JSON.parse(call.arguments || '{}');
+    } catch {
+      throw chatError('invalid_tool_call', 'Mistral chat tool call failed');
+    }
+    if (call.name === 'web_search') args = validateWebSearchInput(args);
+    return { event: 'tool_call', id: call.id, name: call.name, arguments: args };
+  });
 }
 
 function chatError(code, message) {

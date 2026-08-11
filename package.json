@@ -4,12 +4,17 @@
   "private": true,
   "description": "Minimal Mistral Voxtral TTS API integration",
   "type": "module",
+  "bin": {
+    "voxtral": "src/control-cli.mjs"
+  },
   "scripts": {
     "test": "node --test",
     "tts": "node --env-file=.env src/cli.mjs",
     "transcribe": "node --env-file=.env src/transcribe-cli.mjs",
     "daemon": "node --env-file=.env src/daemon.mjs",
-    "control": "node --env-file=.env src/daemon.mjs --control",
+    "control": "node src/control-cli.mjs",
+    "service:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-windows-service.ps1",
+    "service:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall-windows-service.ps1",
     "dev": "node --env-file=.env src/server.mjs",
     "start": "node --env-file=.env src/server.mjs"
   },

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { streamChat } from '../src/providers/mistral-chat.mjs';
+import { WEB_SEARCH_TOOL } from '../src/providers/web-search.mjs';
 
 test('streams text deltas and sentence-ready events from the chat endpoint', async () => {
   let request;
@@ -147,6 +148,37 @@ test('parses a final SSE event when the stream closes without a blank delimiter'
     { event: 'delta', text: 'Last line.' },
     { event: 'sentence_ready', text: 'Last line.' },
   ]);
+});
+
+test('assembles validated web_search tool calls from streamed argument fragments', async () => {
+  let body;
+  const events = [];
+  for await (const event of streamChat({
+    apiKey: 'test-key',
+    messages: [{ role: 'user', content: 'What changed this week?' }],
+    tools: [WEB_SEARCH_TOOL],
+    fetchImpl: async (_url, options) => {
+      body = JSON.parse(options.body);
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"web_search","arguments":"{\\"query\\":\\"Voxtral"}}]}}]}\n\n'
+            + 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" updates\\",\\"recencyDays\\":7}"}}]}}]}\n\n'
+            + 'data: [DONE]\n\n',
+          ));
+          controller.close();
+        },
+      }), { status: 200 });
+    },
+  })) events.push(event);
+
+  assert.deepEqual(body.tools, [WEB_SEARCH_TOOL]);
+  assert.deepEqual(events, [{
+    event: 'tool_call',
+    id: 'call_1',
+    name: 'web_search',
+    arguments: { query: 'Voxtral updates', recencyDays: 7 },
+  }]);
 });
 
 function doneResponse() {

@@ -9,6 +9,11 @@ const DEFAULTS = {
 export function loadConfig(env = process.env, argv = []) {
   const apiKey = cleanRequired(env.MISTRAL_API_KEY);
   const mode = readMode(env, argv);
+  const audioProfile = readAudioProfile(argv);
+  const echoCancellation = argv.includes('--echo-cancel');
+  if (audioProfile === 'speaker' && !echoCancellation) {
+    throw invalidCliArgument('missing_echo_cancel', 'speaker mode requires --echo-cancel', '--echo-cancel');
+  }
 
   return {
     apiKey,
@@ -20,9 +25,24 @@ export function loadConfig(env = process.env, argv = []) {
     voiceId: cleanOptional(env.MISTRAL_VOICE_ID),
     inputDevice: readDeviceId(argv, '--input-device'),
     outputDevice: readDeviceId(argv, '--output-device'),
+    audioProfile,
+    echoCancellation,
     sampleRate: 16000,
     frameMs: 20,
   };
+}
+
+function readAudioProfile(argv) {
+  const flag = '--audio-profile';
+  const index = argv.findIndex((argument) => argument === flag || argument.startsWith(`${flag}=`));
+  if (index === -1) return 'headset';
+  const argument = argv[index];
+  const value = argument === flag ? argv[index + 1] : argument.slice(flag.length + 1);
+  if (!value || value.startsWith('--')) throw invalidCliArgument('missing_value', `${flag} requires headset or speaker`, flag);
+  if (!['headset', 'speaker'].includes(value)) {
+    throw invalidCliArgument('invalid_value', `${flag} must be headset or speaker`, flag);
+  }
+  return value;
 }
 
 function readPositiveInteger(argv, flag, defaultValue) {
