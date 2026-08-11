@@ -3,7 +3,7 @@ import { streamSpeech } from './providers/mistral-tts-stream.mjs';
 
 export { streamSpeech };
 
-export const DEFAULT_MODEL = 'voxtral-mini-tts-latest';
+export const DEFAULT_MODEL = 'voxtral-mini-tts-2603';
 export const DEFAULT_BASE_URL = 'https://api.mistral.ai';
 
 const RESPONSE_FORMATS = new Set(['pcm', 'wav', 'mp3', 'flac', 'opus']);

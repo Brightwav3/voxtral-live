@@ -25,7 +25,7 @@ test('streams decoded PCM chunks from SSE events split across arbitrary byte bou
   assert.equal(request.url, 'https://api.mistral.ai/v1/audio/speech');
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   assert.deepEqual(JSON.parse(request.options.body), {
-    model: 'voxtral-mini-tts-latest',
+    model: 'voxtral-mini-tts-2603',
     input: 'Ahoj',
     voice_id: 'voice-1',
     response_format: 'pcm',

@@ -3,7 +3,7 @@ const DEFAULTS = {
   sttModel: 'voxtral-mini-transcribe-realtime-2602',
   sttDelayMs: 240,
   llmModel: 'mistral-small-latest',
-  ttsModel: 'voxtral-mini-tts-latest',
+  ttsModel: 'voxtral-mini-tts-2603',
   voiceId: 'c69964a6-ab8b-4f8a-9465-ec0925096ec8',
 };
 

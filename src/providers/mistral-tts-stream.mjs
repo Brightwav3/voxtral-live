@@ -1,4 +1,4 @@
-export const DEFAULT_TTS_MODEL = 'voxtral-mini-tts-latest';
+export const DEFAULT_TTS_MODEL = 'voxtral-mini-tts-2603';
 export const DEFAULT_TTS_BASE_URL = 'https://api.mistral.ai';
 
 export async function* streamSpeech({

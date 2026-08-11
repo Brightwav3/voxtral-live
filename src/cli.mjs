@@ -66,6 +66,6 @@ Options:
       --ref-audio PATH  Reference audio file path for voice cloning
   -f, --format FORMAT   mp3, wav, flac, opus, or pcm (default: mp3)
   -o, --output PATH     Output file (default: output.mp3)
-      --model MODEL     Model override (default: voxtral-mini-tts-latest)
+      --model MODEL     Model override (default: voxtral-mini-tts-2603)
   -h, --help            Show this help`);
 }

@@ -21,7 +21,7 @@ MISTRAL_API_KEY=your-key
 VOXTRAL_MODE=always-on
 MISTRAL_STT_MODEL=voxtral-mini-transcribe-realtime-2602
 MISTRAL_LLM_MODEL=mistral-small-latest
-MISTRAL_TTS_MODEL=voxtral-mini-tts-latest
+MISTRAL_TTS_MODEL=voxtral-mini-tts-2603
 # Optional override; defaults to Paul - Neutral (preset c69964a6-ab8b-4f8a-9465-ec0925096ec8).
 # MISTRAL_VOICE_ID=optional-voice-id
 ```

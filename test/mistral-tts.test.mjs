@@ -29,7 +29,7 @@ test('sends the TTS request and decodes returned audio', async () => {
   assert.equal(request.url, 'https://api.mistral.ai/v1/audio/speech');
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   assert.deepEqual(JSON.parse(request.options.body), {
-    model: 'voxtral-mini-tts-latest',
+    model: 'voxtral-mini-tts-2603',
     input: 'Ahoj, světe.',
     voice_id: 'preset-voice',
     response_format: 'mp3',

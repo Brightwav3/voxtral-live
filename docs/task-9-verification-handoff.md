@@ -98,3 +98,28 @@ Fresh evidence:
 The default voice now reaches the daemon TTS request path, but the live
 provider rejection persists. Normal spoken output and barge-in therefore remain
 UNVERIFIED pending a provider-side request/model investigation.
+
+## Follow-up: TTS model default
+
+User-supplied direct-provider evidence returned HTTP 200 with
+`voxtral-mini-tts-2603`, while the daemon had defaulted to
+`voxtral-mini-tts-latest`. The daemon config, streaming adapter, batch adapter,
+CLI help, README, and `.env.example` now default to `voxtral-mini-tts-2603`.
+`MISTRAL_TTS_MODEL` remains an explicit environment override.
+
+Fresh evidence:
+
+- `npm test`: PASS, 88 passed and 0 failed in 584.994 ms.
+- Fresh `npm run daemon -- --mode push-to-talk --input-device 13 --output-device 19`
+  started with no configured `MISTRAL_TTS_MODEL` override.
+- `npm run control -- say "Verification audio."` and `npm run control -- stop`
+  both exited 0; the daemon process exited 0. Captured events reached
+  `assistant_audio_started`, then emitted the same sanitized recoverable
+  `invalid_input` error before `daemon_stopped`.
+- Captured stdout/stderr contained neither the configured API key nor `Bearer `
+  headers.
+
+The default-model mismatch is corrected, but it did not remove the live
+`invalid_input` rejection in the daemon streaming path. Spoken-output and
+barge-in validation remain UNVERIFIED; compare the redacted daemon request
+shape with the known-good direct request before another provider change.
