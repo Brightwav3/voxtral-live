@@ -1,8 +1,8 @@
 {
-  "name": "mistral-tts-integration",
+  "name": "voxtral-live",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal Mistral Voxtral TTS API integration",
+  "description": "Headless Windows voice daemon powered by Mistral audio services",
   "type": "module",
   "bin": {
     "voxtral": "src/control-cli.mjs"

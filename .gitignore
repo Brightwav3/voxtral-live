@@ -3,3 +3,8 @@ node_modules/
 output.*
 prototype-test.mp3
 product-test.mp3
+.superpowers/
+public/
+*.mp3
+*.log
+coverage/
