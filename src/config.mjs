@@ -4,6 +4,7 @@ const DEFAULTS = {
   sttDelayMs: 240,
   llmModel: 'mistral-small-latest',
   ttsModel: 'voxtral-mini-tts-latest',
+  voiceId: 'c69964a6-ab8b-4f8a-9465-ec0925096ec8',
 };
 
 export function loadConfig(env = process.env, argv = []) {
@@ -22,7 +23,7 @@ export function loadConfig(env = process.env, argv = []) {
     sttDelayMs: readPositiveInteger(argv, '--stt-delay-ms', DEFAULTS.sttDelayMs),
     llmModel: cleanOptional(env.MISTRAL_LLM_MODEL) ?? DEFAULTS.llmModel,
     ttsModel: cleanOptional(env.MISTRAL_TTS_MODEL) ?? DEFAULTS.ttsModel,
-    voiceId: cleanOptional(env.MISTRAL_VOICE_ID),
+    voiceId: cleanOptional(env.MISTRAL_VOICE_ID) ?? DEFAULTS.voiceId,
     inputDevice: readDeviceId(argv, '--input-device'),
     outputDevice: readDeviceId(argv, '--output-device'),
     audioProfile,

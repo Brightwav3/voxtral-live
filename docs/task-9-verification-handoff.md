@@ -74,3 +74,27 @@ IDs are machine-specific; use the README probe before deployment.
   and `npm run service:uninstall` on the deployment machine.
 - Speaker-mode barge-in and Czech are unsupported for production. Headset mode
   is the default; Czech requires a separately validated STT/TTS provider.
+
+## Follow-up: configurable Paul - Neutral fallback
+
+The daemon now defaults `voiceId` to the verified Mistral preset
+`c69964a6-ab8b-4f8a-9465-ec0925096ec8` (Paul - Neutral) only when
+`MISTRAL_VOICE_ID` is absent. An explicit environment value still wins. The
+preset is a configurable provider setting, not an official affiliation or
+endorsement.
+
+Fresh evidence:
+
+- `npm test`: PASS, 88 passed and 0 failed in 549.208 ms.
+- `npm run daemon -- --mode push-to-talk --input-device 13 --output-device 19`:
+  PASS: `daemon_started` and `listening` events observed with no configured
+  `MISTRAL_VOICE_ID` override.
+- `npm run control -- say "Verification audio."`: exit 0. The daemon emitted
+  `assistant_started`, `assistant_audio_started`, then the existing sanitized
+  recoverable `invalid_input` event; playback still was not observed.
+- `npm run control -- stop`: exit 0; daemon process exited 0. Captured output
+  contained neither the configured API key nor `Bearer ` headers.
+
+The default voice now reaches the daemon TTS request path, but the live
+provider rejection persists. Normal spoken output and barge-in therefore remain
+UNVERIFIED pending a provider-side request/model investigation.

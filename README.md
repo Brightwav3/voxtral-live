@@ -22,7 +22,8 @@ VOXTRAL_MODE=always-on
 MISTRAL_STT_MODEL=voxtral-mini-transcribe-realtime-2602
 MISTRAL_LLM_MODEL=mistral-small-latest
 MISTRAL_TTS_MODEL=voxtral-mini-tts-latest
-MISTRAL_VOICE_ID=optional-voice-id
+# Optional override; defaults to Paul - Neutral (preset c69964a6-ab8b-4f8a-9465-ec0925096ec8).
+# MISTRAL_VOICE_ID=optional-voice-id
 ```
 
 `MISTRAL_API_KEY` is required. `VOXTRAL_MODE` accepts `always-on` (default) or
@@ -52,8 +53,11 @@ acoustic echo canceller and needs device-specific validation.
 
 Model selection is environment-driven. Set `MISTRAL_STT_MODEL`,
 `MISTRAL_LLM_MODEL`, or `MISTRAL_TTS_MODEL` in `.env` (or the process
-environment) and restart the daemon. `MISTRAL_VOICE_ID` selects an optional
-voice.
+environment) and restart the daemon. When `MISTRAL_VOICE_ID` is absent, the
+daemon uses its configurable Paul - Neutral preset
+(`c69964a6-ab8b-4f8a-9465-ec0925096ec8`); setting the variable overrides that
+default. This preset is a Mistral configuration choice, not an official
+affiliation or endorsement.
 
 ## Local IPC and service lifecycle
 

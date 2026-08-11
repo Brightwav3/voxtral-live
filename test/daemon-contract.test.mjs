@@ -39,7 +39,7 @@ test('loads the default daemon configuration', () => {
     sttDelayMs: 240,
     llmModel: 'mistral-small-latest',
     ttsModel: 'voxtral-mini-tts-latest',
-    voiceId: undefined,
+      voiceId: 'c69964a6-ab8b-4f8a-9465-ec0925096ec8',
     inputDevice: undefined,
     outputDevice: undefined,
     audioProfile: 'headset',
@@ -59,7 +59,7 @@ test('loads optional PortAudio device IDs from CLI flags', () => {
       sttDelayMs: 240,
       llmModel: 'mistral-small-latest',
       ttsModel: 'voxtral-mini-tts-latest',
-      voiceId: undefined,
+    voiceId: 'c69964a6-ab8b-4f8a-9465-ec0925096ec8',
       inputDevice: 2,
       outputDevice: 7,
       audioProfile: 'headset',
@@ -67,6 +67,13 @@ test('loads optional PortAudio device IDs from CLI flags', () => {
       sampleRate: 16000,
       frameMs: 20,
     },
+  );
+});
+
+test('honors MISTRAL_VOICE_ID over the configurable daemon default', () => {
+  assert.equal(
+    loadConfig({ MISTRAL_API_KEY: 'test-key', MISTRAL_VOICE_ID: 'custom-voice' }).voiceId,
+    'custom-voice',
   );
 });
 

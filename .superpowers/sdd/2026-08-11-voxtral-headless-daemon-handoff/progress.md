@@ -17,3 +17,4 @@ Tasks 6–8: fix round 1/5 (6 addressed, 1 open — playback drain, stateful ech
 Tasks 6–8: fix round 2/5 (1 addressed — interrupted STT identity replacement; commits c656f1c..c06fee0)
 Tasks 6–8: complete (commits 684f58d..c06fee0, review clean)
 Task 9: verification/handoff complete pending commit (87/87 tests; Node and PowerShell syntax checks; real push-to-talk and always-on startup, IPC, clean shutdown/device reopen, and captured-log redaction verified; live TTS emitted recoverable `invalid_input`, so normal-turn, barge-in, TTS latency, service-install, speaker-mode, and Czech production validation remain unverified).
+Task 9 follow-up: configurable Paul - Neutral fallback added and contract-tested (88/88 tests). Fresh push-to-talk startup plus `say`/`stop` exited 0 with no configured voice override and redacted capture, but live TTS still emitted recoverable `invalid_input`; spoken-output and barge-in validation remain unverified.
