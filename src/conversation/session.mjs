@@ -94,11 +94,11 @@ export function createConversationSession({
     turnController.pushFinal(text);
   }
 
-  function beginUserTurn(preallocated) {
+  function beginUserTurn(preallocated, replaces) {
     const turn = preallocated ?? allocateTurn();
     activeTurn = turn;
     cancellation.begin(turn);
-    transcriber.beginTurn(turn);
+    transcriber.beginTurn(turn, replaces ? { replaces } : undefined);
     delegation?.beginTurn(turn.turnId);
     transition(SESSION_STATES.LISTENING);
     publish({ event: 'user_started' }, turn);
@@ -124,7 +124,7 @@ export function createConversationSession({
       newGenerationId: next.generationId,
     });
     if (previous) publish({ event: 'assistant_cancelled', reason: 'barge_in' }, previous);
-    beginUserTurn(next);
+    beginUserTurn(next, previous);
   }
 
   function startAssistantTurn(text) {

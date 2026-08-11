@@ -25,11 +25,16 @@ export function createRealtimeTranscriber({
 
   return { connect, beginTurn, pushAudio, on, close };
 
-  function beginTurn({ turnId, generationId } = {}) {
+  function beginTurn({ turnId, generationId } = {}, { replaces } = {}) {
     if (typeof turnId !== 'string' || !turnId.trim()) throw new TypeError('turnId is required');
     if (typeof generationId !== 'string' || !generationId.trim()) throw new TypeError('generationId is required');
+    if (replaces !== undefined) {
+      validateTurnIdentity(replaces, 'replaces');
+      const replacedIndex = pendingTurns.findIndex((turn) => sameTurnIdentity(turn, replaces));
+      if (replacedIndex !== -1) pendingTurns.splice(replacedIndex, 1);
+    }
     const previous = pendingTurns.at(-1);
-    if (previous?.turnId === turnId && previous?.generationId === generationId) return;
+    if (sameTurnIdentity(previous, { turnId, generationId })) return;
     pendingTurns.push({ turnId, generationId });
   }
 
@@ -166,6 +171,17 @@ function validateOptions({ apiKey, model, targetDelayMs, WebSocketImpl }) {
   if (typeof model !== 'string' || !model.trim()) throw new Error('Realtime transcription model is required');
   if (!Number.isInteger(targetDelayMs) || targetDelayMs <= 0) throw new Error('targetDelayMs must be a positive integer');
   if (typeof WebSocketImpl !== 'function') throw new Error('WebSocket implementation is required');
+}
+
+function validateTurnIdentity(identity, name) {
+  if (typeof identity?.turnId !== 'string' || !identity.turnId.trim()
+      || typeof identity?.generationId !== 'string' || !identity.generationId.trim()) {
+    throw new TypeError(`${name} must include turnId and generationId`);
+  }
+}
+
+function sameTurnIdentity(left, right) {
+  return left?.turnId === right?.turnId && left?.generationId === right?.generationId;
 }
 
 function addListener(socket, eventName, handler) {

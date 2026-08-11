@@ -109,6 +109,21 @@ test('maps text deltas and complete transcripts without exposing provider payloa
   ]);
 });
 
+test('associates the next final with the replacement turn when the interrupted turn has no final', async () => {
+  const transcriber = createSubject();
+  const finals = [];
+  transcriber.on('final', (event) => finals.push(event));
+  const socket = await connect(transcriber);
+  const interrupted = { turnId: 't_old', generationId: 'g_old' };
+  const current = { turnId: 't_current', generationId: 'g_current' };
+  transcriber.beginTurn(interrupted);
+  transcriber.beginTurn(current, { replaces: interrupted });
+
+  socket.message({ type: 'transcription.done', text: 'Current turn' });
+
+  assert.deepEqual(finals, [{ event: 'final', text: 'Current turn', ...current }]);
+});
+
 test('maps provider errors to recoverable sanitized errors', async () => {
   const transcriber = createSubject();
   const errors = [];

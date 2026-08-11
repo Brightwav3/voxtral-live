@@ -240,6 +240,37 @@ test('discards a delayed final STT callback from the pre-barge generation', asyn
   await subject.session.shutdown();
 });
 
+test('accepts the current final when the interrupted turn never produced a provider final', async () => {
+  const holdSpeech = deferred();
+  const subject = createSubject({
+    async *streamChat() { yield { event: 'sentence_ready', text: 'Speaking.' }; },
+    async speak() { await holdSpeech.promise; },
+  });
+  await subject.session.start();
+  subject.input({ speechStarted: true });
+  subject.turnController.emit('turn', { text: 'Start without an STT final' });
+  await waitFor(() => subject.session.status().state === 'SPEAKING');
+
+  subject.input({ speechStarted: true });
+  const current = subject.session.status();
+  subject.nextFinal('Current turn');
+  await waitFor(() => subject.events.some((event) => event.event === 'user_transcript'));
+
+  assert.deepEqual(
+    subject.events.find((event) => event.event === 'user_transcript'),
+    {
+      event: 'user_transcript',
+      text: 'Current turn',
+      final: true,
+      conversationId: 'conversation-test',
+      turnId: current.turnId,
+      generationId: current.generationId,
+    },
+  );
+  holdSpeech.resolve();
+  await subject.session.shutdown();
+});
+
 function createSubject(overrides = {}) {
   const events = [];
   const audio = {
@@ -255,9 +286,17 @@ function createSubject(overrides = {}) {
     async close() {},
   };
   let transcriberContext;
+  const pendingTranscriberTurns = [];
   const transcriber = createEmitter({
     frames: [],
-    beginTurn(turn) { transcriberContext = { turnId: turn.turnId, generationId: turn.generationId }; },
+    beginTurn(turn, { replaces } = {}) {
+      if (replaces) {
+        const index = pendingTranscriberTurns.findIndex((pending) => sameIdentity(pending, replaces));
+        if (index !== -1) pendingTranscriberTurns.splice(index, 1);
+      }
+      transcriberContext = { turnId: turn.turnId, generationId: turn.generationId };
+      pendingTranscriberTurns.push(transcriberContext);
+    },
     async connect() {},
     pushAudio(frame) { transcriber.frames.push(frame); return true; },
     async close() {},
@@ -298,8 +337,20 @@ function createSubject(overrides = {}) {
     vad,
     events,
     input: (frame) => audio.input(frame),
-    final(text, context = transcriberContext) { transcriber.emit('final', { text, ...context }); },
+    final(text, context = transcriberContext) {
+      const index = pendingTranscriberTurns.findIndex((pending) => sameIdentity(pending, context));
+      if (index !== -1) pendingTranscriberTurns.splice(index, 1);
+      transcriber.emit('final', { text, ...context });
+    },
+    nextFinal(text) {
+      const context = pendingTranscriberTurns.shift();
+      transcriber.emit('final', { text, ...context });
+    },
   };
+}
+
+function sameIdentity(left, right) {
+  return left?.turnId === right?.turnId && left?.generationId === right?.generationId;
 }
 
 function signalFrame(sampleRate, length, frequency) {

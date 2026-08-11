@@ -186,3 +186,45 @@ No whitespace errors (Git reported only the repository's LF-to-CRLF warnings)
 - No live Mistral, search endpoint, microphone/speaker, or Scheduled Task
   installation was exercised. Search/delegation cancellation is preserved by
   the full deterministic suite.
+
+## Integration fix round 2 — 2026-08-11
+
+### Narrow STT identity fix
+
+- Root cause: realtime STT stored every `beginTurn()` identity in a FIFO. When
+  barge-in replaced a turn whose provider final never arrived, that stale
+  identity remained at the head and consumed the next real final. Session then
+  rejected the current transcript because it was tagged with the old IDs.
+- Barge-in now passes the interrupted identity as explicit `replaces` metadata
+  when registering the new turn. The realtime adapter removes only that exact
+  `turnId`/`generationId` before appending the replacement, preserving normal
+  FIFO behavior while preventing the missing-final loss.
+- Existing session final guards remain unchanged: callbacks explicitly tagged
+  with an old identity are still rejected.
+
+### Regression evidence
+
+Before implementation, the new provider/session regressions produced 16 passes
+and 2 failures: the provider tagged the current final as `t_old/g_old`, and the
+session timed out waiting for the current transcript.
+
+Focused verification:
+
+```text
+npm test -- test/providers-mistral.test.mjs test/session.test.mjs
+18 passed, 0 failed
+```
+
+Full verification and checks:
+
+```text
+npm test
+87 passed, 0 failed
+
+node --check src/providers/mistral-realtime-stt.mjs
+node --check src/conversation/session.mjs
+Node syntax OK
+
+git diff --check
+No whitespace errors (Git reported only the repository's LF-to-CRLF warnings)
+```
