@@ -1,5 +1,10 @@
 # Voxtral Live
 
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](https://learn.microsoft.com/en-us/windows/)
+[![Node.js 20.6+](https://img.shields.io/badge/Node.js-20.6%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Provider: Mistral Voxtral](https://img.shields.io/badge/Provider-Mistral%20Voxtral-111827)](https://mistral.ai/)
+[![Related to Assistant Mark I](https://img.shields.io/badge/Related%20to-Assistant%20Mark%20I-6f42c1)](https://github.com/Brightwav3/Assistant-mark-I)
+
 Voxtral Live is a headless Windows voice daemon: microphone PCM streams to
 Voxtral Realtime STT, completed turns stream through Mistral chat, and
 sentence-sized output streams through Voxtral TTS to the selected speaker.
