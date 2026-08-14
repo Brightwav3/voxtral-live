@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voxtral Studio</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #11151b;
+        --panel: #191f27;
+        --panel-strong: #202832;
+        --paper: #f4f0e7;
+        --muted: #a7b0b7;
+        --line: #33404b;
+        --signal: #f0b84b;
+        --mint: #79dbc6;
+        --danger: #f18e75;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--paper);
+        background:
+          radial-gradient(circle at 78% 12%, rgba(240, 184, 75, .13), transparent 28rem),
+          var(--ink);
+      }
+
+      main { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 42px 0 56px; }
+      header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; padding-bottom: 30px; border-bottom: 1px solid var(--line); }
+      .eyebrow { color: var(--signal); font: 700 11px/1.2 ui-monospace, SFMono-Regular, monospace; letter-spacing: .16em; text-transform: uppercase; }
+      h1 { margin: 10px 0 0; max-width: 680px; font: 600 clamp(2.6rem, 7vw, 5.8rem)/.92 Georgia, "Times New Roman", serif; letter-spacing: -.06em; }
+      .lede { max-width: 260px; margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.55; }
+      .grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 18px; margin-top: 18px; }
+      .card { padding: 24px; background: rgba(25, 31, 39, .9); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 22px 80px rgba(0, 0, 0, .18); }
+      .card h2 { margin: 0 0 20px; font-size: 1rem; font-weight: 650; letter-spacing: .01em; }
+      label { display: block; margin: 0 0 8px; color: var(--muted); font: 700 11px/1.2 ui-monospace, SFMono-Regular, monospace; letter-spacing: .1em; text-transform: uppercase; }
+      textarea, select, input[type="file"] { width: 100%; color: var(--paper); background: var(--panel-strong); border: 1px solid var(--line); border-radius: 3px; font: inherit; }
+      textarea { min-height: 170px; padding: 14px; resize: vertical; line-height: 1.5; }
+      select { padding: 11px 12px; }
+      input[type="file"] { padding: 10px; }
+      textarea:focus-visible, select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+      .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; margin-top: 16px; }
+      button { padding: 12px 16px; color: var(--ink); background: var(--signal); border: 0; border-radius: 3px; font-weight: 750; cursor: pointer; }
+      button:hover { filter: brightness(1.08); }
+      button:disabled { cursor: wait; opacity: .55; }
+      .status { min-height: 1.4em; margin: 16px 0 0; color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, monospace; }
+      .status[data-kind="ok"] { color: var(--mint); }
+      .status[data-kind="error"] { color: var(--danger); }
+      .meter { display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; height: 94px; align-items: end; margin: 26px 0 24px; padding: 0 2px; }
+      .meter i { display: block; height: 18%; background: var(--mint); opacity: .78; transform-origin: bottom; animation: pulse 1.6s ease-in-out infinite alternate; }
+      .meter i:nth-child(2n) { animation-delay: -.5s; } .meter i:nth-child(3n) { animation-delay: -1s; }
+      @keyframes pulse { to { height: 82%; opacity: 1; } }
+      .note { margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.6; }
+      audio { width: 100%; margin-top: 20px; }
+      .stack { display: grid; gap: 18px; }
+      .small { margin-top: 10px; font-size: .78rem; }
+      @media (prefers-reduced-motion: reduce) { .meter i { animation: none; } }
+      @media (max-width: 760px) { main { width: min(100% - 24px, 620px); padding-top: 24px; } header, .grid { display: block; } .lede { margin-top: 18px; } .card { margin-top: 12px; } .row { grid-template-columns: 1fr; } button { width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div><div class="eyebrow">Local audio workbench / 01</div><h1>Voxtral Studio</h1></div>
+        <p class="lede">A small browser harness for testing speech generation and transcription while the daemon stays headless.</p>
+      </header>
+
+      <section class="grid" aria-label="Voxtral Studio controls">
+        <form class="card" id="speech-form">
+          <h2>Generate a voice sample</h2>
+          <label for="text">Text</label>
+          <textarea id="text" required>Say something worth hearing.</textarea>
+          <div class="row">
+            <div><label for="voice">Voice</label><select id="voice"><option value="">Loading voices…</option></select></div>
+            <button type="submit">Generate audio</button>
+          </div>
+          <p class="status" id="speech-status" aria-live="polite"></p>
+          <audio id="audio" controls hidden></audio>
+        </form>
+
+        <div class="stack">
+          <section class="card">
+            <h2>Signal</h2>
+            <div class="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <p class="note">The Studio talks to the local HTTP adapter. Your API key remains on the server.</p>
+          </section>
+          <form class="card" id="transcribe-form">
+            <h2>Transcribe a recording</h2>
+            <label for="file">Audio file</label>
+            <input id="file" name="file" type="file" accept="audio/*" required>
+            <button type="submit" style="margin-top: 16px">Transcribe</button>
+            <p class="status" id="transcribe-status" aria-live="polite"></p>
+            <p class="note small" id="transcript"></p>
+          </form>
+        </div>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const setStatus = (node, message, kind = '') => { node.textContent = message; node.dataset.kind = kind; };
+
+      async function loadVoices() {
+        const select = $('voice');
+        try {
+          const response = await fetch('/api/voices');
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || 'Voice listing failed');
+          select.replaceChildren(...(payload.data || []).map((voice) => new Option(voice.name || voice.id, voice.id)));
+          if (!select.options.length) select.add(new Option('Provider default', '')); 
+        } catch (error) {
+          select.replaceChildren(new Option('Provider default', ''));
+          setStatus($('speech-status'), error.message, 'error');
+        }
+      }
+
+      $('speech-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('button');
+        button.disabled = true;
+        setStatus($('speech-status'), 'Generating…');
+        try {
+          const response = await fetch('/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: $('text').value, voiceId: $('voice').value, format: 'mp3' }) });
+          if (!response.ok) throw new Error((await response.json()).error || 'Speech generation failed');
+          const audio = $('audio');
+          audio.src = URL.createObjectURL(await response.blob());
+          audio.hidden = false;
+          setStatus($('speech-status'), 'Audio ready.', 'ok');
+        } catch (error) { setStatus($('speech-status'), error.message, 'error'); }
+        finally { button.disabled = false; }
+      });
+
+      $('transcribe-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('button');
+        button.disabled = true;
+        setStatus($('transcribe-status'), 'Transcribing…');
+        try {
+          const response = await fetch('/api/transcribe', { method: 'POST', body: new FormData(event.currentTarget) });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || 'Transcription failed');
+          $('transcript').textContent = payload.text;
+          setStatus($('transcribe-status'), 'Transcript ready.', 'ok');
+        } catch (error) { setStatus($('transcribe-status'), error.message, 'error'); }
+        finally { button.disabled = false; }
+      });
+
+      loadVoices();
+    </script>
+  </body>
+</html>
